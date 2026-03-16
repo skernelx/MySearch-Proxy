@@ -92,6 +92,82 @@ def get_service(service_value, default="tavily"):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+def reset_social_gateway_cache():
+    social_gateway_state_cache["expires_at"] = 0.0
+    social_gateway_state_cache["value"] = None
+
+
+def get_setting_text(key, default=""):
+    value = db.get_setting(key, default)
+    if value is None:
+        return str(default or "").strip()
+    return str(value).strip()
+
+
+def get_runtime_social_config():
+    upstream_base_url = (
+        get_setting_text("social_upstream_base_url", SOCIAL_GATEWAY_UPSTREAM_BASE_URL).rstrip("/")
+        or SOCIAL_GATEWAY_UPSTREAM_BASE_URL
+    )
+    admin_base_value = get_setting_text("social_admin_base_url", "")
+    cache_ttl_raw = get_setting_text(
+        "social_cache_ttl_seconds",
+        str(SOCIAL_GATEWAY_CACHE_TTL_SECONDS),
+    )
+    try:
+        cache_ttl_seconds = max(5, int(cache_ttl_raw or SOCIAL_GATEWAY_CACHE_TTL_SECONDS))
+    except (TypeError, ValueError):
+        cache_ttl_seconds = SOCIAL_GATEWAY_CACHE_TTL_SECONDS
+
+    return {
+        "upstream_base_url": upstream_base_url,
+        "upstream_responses_path": _normalize_path(
+            get_setting_text(
+                "social_upstream_responses_path",
+                SOCIAL_GATEWAY_UPSTREAM_RESPONSES_PATH,
+            ),
+            SOCIAL_GATEWAY_UPSTREAM_RESPONSES_PATH,
+        ),
+        "upstream_api_key": get_setting_text(
+            "social_upstream_api_key",
+            SOCIAL_GATEWAY_UPSTREAM_API_KEY,
+        ),
+        "model": get_setting_text("social_model", SOCIAL_GATEWAY_MODEL) or SOCIAL_GATEWAY_MODEL,
+        "gateway_token": get_setting_text("social_gateway_token", SOCIAL_GATEWAY_TOKEN),
+        "admin_base_url": (
+            admin_base_value.rstrip("/")
+            if admin_base_value
+            else _derive_social_gateway_admin_base_url(upstream_base_url)
+        ),
+        "admin_verify_path": _normalize_path(
+            get_setting_text(
+                "social_admin_verify_path",
+                SOCIAL_GATEWAY_ADMIN_VERIFY_PATH,
+            ),
+            SOCIAL_GATEWAY_ADMIN_VERIFY_PATH,
+        ),
+        "admin_config_path": _normalize_path(
+            get_setting_text(
+                "social_admin_config_path",
+                SOCIAL_GATEWAY_ADMIN_CONFIG_PATH,
+            ),
+            SOCIAL_GATEWAY_ADMIN_CONFIG_PATH,
+        ),
+        "admin_tokens_path": _normalize_path(
+            get_setting_text(
+                "social_admin_tokens_path",
+                SOCIAL_GATEWAY_ADMIN_TOKENS_PATH,
+            ),
+            SOCIAL_GATEWAY_ADMIN_TOKENS_PATH,
+        ),
+        "admin_app_key": get_setting_text(
+            "social_admin_app_key",
+            SOCIAL_GATEWAY_ADMIN_APP_KEY,
+        ),
+        "cache_ttl_seconds": cache_ttl_seconds,
+    }
+
+
 # ═══ Auth helpers ═══
 
 def verify_admin(request: Request):
@@ -264,12 +340,12 @@ def build_social_token_source(state):
     return "not_configured"
 
 
-async def fetch_social_admin_json(path):
-    if not SOCIAL_GATEWAY_ADMIN_APP_KEY:
+async def fetch_social_admin_json(config, path):
+    if not config["admin_app_key"]:
         raise RuntimeError("Missing SOCIAL_GATEWAY_ADMIN_APP_KEY")
     response = await http_client.get(
-        f"{SOCIAL_GATEWAY_ADMIN_BASE_URL}{path}",
-        headers={"Authorization": f"Bearer {SOCIAL_GATEWAY_ADMIN_APP_KEY}"},
+        f"{config['admin_base_url']}{path}",
+        headers={"Authorization": f"Bearer {config['admin_app_key']}"},
     )
     try:
         payload = response.json()
@@ -297,24 +373,27 @@ async def resolve_social_gateway_state(force=False):
         if not force and cached and social_gateway_state_cache.get("expires_at", 0) > now:
             return cached
 
+        config = get_runtime_social_config()
         state = {
-            "upstream_base_url": SOCIAL_GATEWAY_UPSTREAM_BASE_URL,
-            "upstream_responses_path": SOCIAL_GATEWAY_UPSTREAM_RESPONSES_PATH,
-            "admin_base_url": SOCIAL_GATEWAY_ADMIN_BASE_URL,
-            "admin_verify_path": SOCIAL_GATEWAY_ADMIN_VERIFY_PATH,
-            "admin_config_path": SOCIAL_GATEWAY_ADMIN_CONFIG_PATH,
-            "admin_tokens_path": SOCIAL_GATEWAY_ADMIN_TOKENS_PATH,
-            "admin_configured": bool(SOCIAL_GATEWAY_ADMIN_BASE_URL and SOCIAL_GATEWAY_ADMIN_APP_KEY),
+            "upstream_base_url": config["upstream_base_url"],
+            "upstream_responses_path": config["upstream_responses_path"],
+            "admin_base_url": config["admin_base_url"],
+            "admin_verify_path": config["admin_verify_path"],
+            "admin_config_path": config["admin_config_path"],
+            "admin_tokens_path": config["admin_tokens_path"],
+            "admin_configured": bool(config["admin_base_url"] and config["admin_app_key"]),
             "admin_connected": False,
-            "manual_upstream_key": bool(SOCIAL_GATEWAY_UPSTREAM_API_KEY),
-            "manual_gateway_token": bool(SOCIAL_GATEWAY_TOKEN),
-            "upstream_api_keys": parse_secret_values(SOCIAL_GATEWAY_UPSTREAM_API_KEY),
-            "accepted_tokens": parse_secret_values(SOCIAL_GATEWAY_TOKEN),
+            "manual_upstream_key": bool(config["upstream_api_key"]),
+            "manual_gateway_token": bool(config["gateway_token"]),
+            "upstream_api_keys": parse_secret_values(config["upstream_api_key"]),
+            "accepted_tokens": parse_secret_values(config["gateway_token"]),
             "admin_api_keys": [],
             "resolved_upstream_api_key": "",
             "default_client_token": "",
             "token_source": "",
             "mode": "manual",
+            "model": config["model"],
+            "cache_ttl_seconds": config["cache_ttl_seconds"],
             "stats": build_empty_social_stats(),
             "error": "",
         }
@@ -322,8 +401,8 @@ async def resolve_social_gateway_state(force=False):
         if state["admin_configured"]:
             try:
                 admin_config, admin_tokens = await asyncio.gather(
-                    fetch_social_admin_json(SOCIAL_GATEWAY_ADMIN_CONFIG_PATH),
-                    fetch_social_admin_json(SOCIAL_GATEWAY_ADMIN_TOKENS_PATH),
+                    fetch_social_admin_json(config, config["admin_config_path"]),
+                    fetch_social_admin_json(config, config["admin_tokens_path"]),
                 )
                 app_api_keys = parse_secret_values((admin_config.get("app") or {}).get("api_key"))
                 state["admin_connected"] = True
@@ -347,7 +426,7 @@ async def resolve_social_gateway_state(force=False):
         state["mode"] = build_social_gateway_mode(state)
 
         social_gateway_state_cache["value"] = state
-        social_gateway_state_cache["expires_at"] = now + SOCIAL_GATEWAY_CACHE_TTL_SECONDS
+        social_gateway_state_cache["expires_at"] = now + state["cache_ttl_seconds"]
         return state
 
 
@@ -646,6 +725,7 @@ async def build_social_dashboard():
         "service": "social",
         "label": "Social / X",
         "mode": state["mode"],
+        "model": state["model"],
         "token_source": state["token_source"],
         "upstream_base_url": state["upstream_base_url"],
         "upstream_responses_path": state["upstream_responses_path"],
@@ -660,6 +740,33 @@ async def build_social_dashboard():
         "client_token_masked": mask_secret(state["default_client_token"]),
         "stats": state["stats"],
         "error": state["error"],
+    }
+
+
+async def build_settings_payload():
+    config = get_runtime_social_config()
+    state = await resolve_social_gateway_state(force=False)
+    return {
+        "social": {
+            "upstream_base_url": config["upstream_base_url"],
+            "upstream_responses_path": config["upstream_responses_path"],
+            "admin_base_url": config["admin_base_url"],
+            "admin_verify_path": config["admin_verify_path"],
+            "admin_config_path": config["admin_config_path"],
+            "admin_tokens_path": config["admin_tokens_path"],
+            "model": config["model"],
+            "cache_ttl_seconds": config["cache_ttl_seconds"],
+            "admin_app_key_configured": bool(config["admin_app_key"]),
+            "admin_app_key_masked": mask_secret(config["admin_app_key"]),
+            "upstream_api_key_configured": bool(config["upstream_api_key"]),
+            "upstream_api_key_masked": mask_secret(config["upstream_api_key"]),
+            "gateway_token_configured": bool(config["gateway_token"]),
+            "gateway_token_masked": mask_secret(config["gateway_token"]),
+            "mode": state["mode"],
+            "token_source": state["token_source"],
+            "admin_connected": state["admin_connected"],
+            "error": state["error"],
+        }
     }
 
 
@@ -853,7 +960,7 @@ def normalize_result_item(item):
     return result
 
 
-def build_social_search_upstream_payload(body):
+def build_social_search_upstream_payload(body, model):
     query = (body.get("query") or "").strip()
     max_results = max(1, min(int(body.get("max_results") or 5), 10))
     tools = [{"type": "x_search"}]
@@ -881,7 +988,7 @@ def build_social_search_upstream_payload(body):
         "Use empty strings for unknown fields."
     )
     return {
-        "model": SOCIAL_GATEWAY_MODEL,
+        "model": model,
         "input": [{"role": "user", "content": prompt}],
         "tools": tools,
         "temperature": 0,
@@ -1066,7 +1173,7 @@ async def social_health():
         "upstream_base_url": state["upstream_base_url"],
         "upstream_responses_path": state["upstream_responses_path"],
         "admin_base_url": state["admin_base_url"],
-        "model": SOCIAL_GATEWAY_MODEL,
+        "model": state["model"],
         "token_source": state["token_source"],
         "admin_configured": state["admin_configured"],
         "admin_connected": state["admin_connected"],
@@ -1098,7 +1205,7 @@ async def proxy_social_search(request: Request):
     if not state["resolved_upstream_api_key"]:
         raise HTTPException(status_code=503, detail="Missing social upstream API key")
 
-    upstream_payload = build_social_search_upstream_payload(body)
+    upstream_payload = build_social_search_upstream_payload(body, state["model"])
     max_results = max(1, min(int(body.get("max_results") or 5), 10))
 
     try:
@@ -1161,6 +1268,62 @@ async def stats(request: Request, _=Depends(verify_admin)):
             "firecrawl": firecrawl_stats,
         },
         "social": social_stats,
+    }
+
+
+@app.get("/api/settings")
+async def get_settings(request: Request, _=Depends(verify_admin)):
+    return await build_settings_payload()
+
+
+@app.put("/api/settings/social")
+async def update_social_settings(request: Request, _=Depends(verify_admin)):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Expected JSON request body")
+
+    text_fields = {
+        "upstream_base_url": "social_upstream_base_url",
+        "upstream_responses_path": "social_upstream_responses_path",
+        "admin_base_url": "social_admin_base_url",
+        "admin_verify_path": "social_admin_verify_path",
+        "admin_config_path": "social_admin_config_path",
+        "admin_tokens_path": "social_admin_tokens_path",
+        "model": "social_model",
+    }
+    secret_fields = {
+        "admin_app_key": "social_admin_app_key",
+        "upstream_api_key": "social_upstream_api_key",
+        "gateway_token": "social_gateway_token",
+    }
+
+    for field, setting_key in text_fields.items():
+        if field not in body:
+            continue
+        value = str(body.get(field) or "").strip()
+        db.set_setting(setting_key, value)
+
+    if "cache_ttl_seconds" in body:
+        try:
+            cache_ttl_seconds = max(5, int(body.get("cache_ttl_seconds") or SOCIAL_GATEWAY_CACHE_TTL_SECONDS))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="cache_ttl_seconds must be an integer")
+        db.set_setting("social_cache_ttl_seconds", str(cache_ttl_seconds))
+
+    for field, setting_key in secret_fields.items():
+        if body.get(f"clear_{field}"):
+            db.set_setting(setting_key, "")
+            continue
+        if field not in body:
+            continue
+        value = str(body.get(field) or "").strip()
+        if value:
+            db.set_setting(setting_key, value)
+
+    reset_social_gateway_cache()
+    return {
+        "ok": True,
+        **(await build_settings_payload()),
     }
 
 

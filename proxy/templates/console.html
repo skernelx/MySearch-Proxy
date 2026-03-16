@@ -191,6 +191,12 @@ body::after {
   min-width: 0;
 }
 
+.hero-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
 .hero-focus {
   width: 100%;
   padding: 22px;
@@ -277,12 +283,6 @@ body::after {
   line-height: 1.65;
 }
 
-.user-menu {
-  position: relative;
-  align-self: flex-end;
-  z-index: 12;
-}
-
 .user-btn,
 .btn {
   border: 1px solid var(--border);
@@ -366,6 +366,170 @@ body::after {
 .dropdown .logout-btn {
   width: 100%;
   margin-top: 14px;
+}
+
+.settings-btn {
+  min-width: 220px;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-modal-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.settings-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.52);
+  backdrop-filter: blur(10px);
+}
+
+.settings-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(1040px, calc(100% - 20px));
+  max-height: min(88vh, 980px);
+  overflow: auto;
+  padding: 24px;
+}
+
+.settings-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.settings-kicker {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.settings-head h2 {
+  font-size: 30px;
+  margin-bottom: 8px;
+}
+
+.settings-head p {
+  color: var(--muted);
+  line-height: 1.7;
+  max-width: 700px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.84fr) minmax(0, 1.16fr);
+  gap: 18px;
+}
+
+.settings-panel {
+  padding: 20px;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(251, 246, 239, 0.84));
+}
+
+.settings-panel h3 {
+  font-size: 19px;
+  margin-bottom: 8px;
+}
+
+.settings-panel p {
+  color: var(--muted);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+
+.settings-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-field label {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-field .hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.settings-field.full-width {
+  grid-column: 1 / -1;
+}
+
+.settings-advanced {
+  margin-top: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.settings-advanced summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text-soft);
+  margin-bottom: 12px;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.settings-status {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--text-soft);
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.settings-status.is-error {
+  color: var(--danger);
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.settings-secret-meta {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+body.modal-open {
+  overflow: hidden;
 }
 
 .summary-strip {
@@ -1083,8 +1247,12 @@ tr:last-child td { border-bottom: none; }
     flex-direction: column;
   }
 
-  .hero-side .user-menu {
-    align-self: flex-start;
+  .hero-actions {
+    justify-content: flex-start;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
   }
 
   .service-tools {
@@ -1106,8 +1274,11 @@ tr:last-child td { border-bottom: none; }
   .hero-focus-metrics,
   .service-toggle-grid,
   .social-board-grid { grid-template-columns: 1fr 1fr; }
+  .settings-fields { grid-template-columns: 1fr; }
   .service-toggle-foot { align-items: flex-start; flex-direction: column; }
   th, td { padding: 10px; }
+  .settings-modal-shell { padding: 14px; }
+  .settings-head { flex-direction: column; }
 }
 
 /* Visual refresh: make the console feel like a polished public product instead of a raw admin table. */
@@ -1436,6 +1607,15 @@ h3,
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.14);
   color: #f8fafc;
+}
+
+.settings-dialog {
+  border-radius: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(250, 244, 236, 0.94)),
+    radial-gradient(circle at top right, rgba(91, 120, 246, 0.08), transparent 26%);
+  box-shadow: var(--shadow-lg);
 }
 
 .summary-strip {
@@ -1954,22 +2134,13 @@ textarea:focus {
         </section>
       </div>
       <div class="hero-side">
-        <div class="hero-focus" id="hero-focus"></div>
-        <div class="user-menu">
-          <button class="user-btn" onclick="toggleDropdown()">
-            Admin
-            <span class="muted">密码 / 退出</span>
+        <div class="hero-actions">
+          <button class="user-btn settings-btn" type="button" onclick="openSettingsModal()">
+            设置
+            <span class="muted">密码 / grok2api / 退出</span>
           </button>
-          <div class="dropdown card" id="user-dropdown">
-            <h3>修改控制台密码</h3>
-            <form class="pwd-row" onsubmit="changePwd(event)">
-              <input type="text" name="proxy-admin-user-reset" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;opacity:0;pointer-events:none;height:0">
-              <input type="password" id="new-pwd" placeholder="新密码（至少 4 位）" autocomplete="new-password">
-              <button type="submit" class="btn btn-primary">保存</button>
-            </form>
-            <button type="button" class="btn btn-danger logout-btn" onclick="logout()">退出登录</button>
-          </div>
         </div>
+        <div class="hero-focus" id="hero-focus"></div>
       </div>
     </header>
 
@@ -2014,6 +2185,111 @@ textarea:focus {
     </section>
 
     <div id="services-root"></div>
+  </div>
+
+  <div class="settings-modal-shell hidden" id="settings-modal">
+    <div class="settings-backdrop" onclick="closeSettingsModal()"></div>
+    <div class="settings-dialog card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="settings-head">
+        <div>
+          <div class="settings-kicker">Console Settings</div>
+          <h2 id="settings-title">设置</h2>
+          <p>在这里统一修改控制台密码，以及 Social / X 的 grok2api / compatible 配置。保存后会立即刷新当前控制台状态。</p>
+        </div>
+        <button class="btn btn-soft" type="button" onclick="closeSettingsModal()">关闭</button>
+      </div>
+
+      <div class="settings-grid">
+        <section class="settings-panel">
+          <h3>控制台密码</h3>
+          <p>控制台登录密码会写进本地数据库。保存后当前会话也会同步更新，不需要重新登录。</p>
+          <form onsubmit="changePwd(event)">
+            <input type="text" name="proxy-admin-user-reset" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;opacity:0;pointer-events:none;height:0">
+            <div class="settings-field">
+              <label for="settings-new-pwd">新密码</label>
+              <input type="password" id="settings-new-pwd" placeholder="至少 4 位" autocomplete="new-password">
+            </div>
+            <div class="settings-actions">
+              <button type="submit" class="btn btn-primary">保存新密码</button>
+              <button type="button" class="btn btn-danger" onclick="logoutFromSettings()">退出登录</button>
+            </div>
+            <div class="settings-status hidden" id="settings-password-status"></div>
+          </form>
+        </section>
+
+        <section class="settings-panel">
+          <h3>Social / X / grok2api</h3>
+          <p>推荐优先填写 grok2api 后台地址和 `app_key`。如果你有自己的 compatible 网关，也可以在这里手动覆写上游 key、客户端 token 和高级路径。</p>
+          <form onsubmit="saveSocialSettings(event)">
+            <div class="settings-fields">
+              <div class="settings-field">
+                <label for="settings-social-upstream-base-url">上游 Base URL</label>
+                <input type="text" id="settings-social-upstream-base-url" placeholder="https://media.example.com/v1">
+                <div class="hint">真正转发 `/responses` 时使用的上游地址。</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-model">模型</label>
+                <input type="text" id="settings-social-model" placeholder="grok-4.1-fast">
+                <div class="hint">用于 `x_search` 请求的默认模型名。</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-admin-base-url">grok2api 后台地址</label>
+                <input type="text" id="settings-social-admin-base-url" placeholder="https://media.example.com">
+                <div class="hint">推荐填后台根地址，系统会自动拉 `config` 和 `tokens`。</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-admin-app-key">grok2api app key</label>
+                <input type="password" id="settings-social-admin-app-key" placeholder="留空表示保持当前值">
+                <div class="hint" id="settings-social-admin-app-key-hint">未配置</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-upstream-api-key">手动上游 API key</label>
+                <input type="password" id="settings-social-upstream-api-key" placeholder="留空表示保持当前值">
+                <div class="hint" id="settings-social-upstream-api-key-hint">未配置</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-gateway-token">客户端 token</label>
+                <input type="password" id="settings-social-gateway-token" placeholder="留空表示保持当前值">
+                <div class="hint" id="settings-social-gateway-token-hint">未配置</div>
+              </div>
+            </div>
+
+            <details class="settings-advanced">
+              <summary>高级路径和缓存</summary>
+              <div class="settings-fields">
+                <div class="settings-field">
+                  <label for="settings-social-upstream-responses-path">Responses Path</label>
+                  <input type="text" id="settings-social-upstream-responses-path" placeholder="/responses">
+                </div>
+                <div class="settings-field">
+                  <label for="settings-social-admin-verify-path">Verify Path</label>
+                  <input type="text" id="settings-social-admin-verify-path" placeholder="/v1/admin/verify">
+                </div>
+                <div class="settings-field">
+                  <label for="settings-social-admin-config-path">Config Path</label>
+                  <input type="text" id="settings-social-admin-config-path" placeholder="/v1/admin/config">
+                </div>
+                <div class="settings-field">
+                  <label for="settings-social-admin-tokens-path">Tokens Path</label>
+                  <input type="text" id="settings-social-admin-tokens-path" placeholder="/v1/admin/tokens">
+                </div>
+                <div class="settings-field full-width">
+                  <label for="settings-social-cache-ttl-seconds">缓存秒数</label>
+                  <input type="text" id="settings-social-cache-ttl-seconds" placeholder="60">
+                  <div class="hint">控制后台状态缓存多久刷新一次，最小 5 秒。</div>
+                </div>
+              </div>
+            </details>
+
+            <div class="settings-secret-meta" id="settings-social-meta"></div>
+            <div class="settings-status hidden" id="settings-social-status"></div>
+            <div class="settings-actions">
+              <button type="submit" class="btn btn-primary">保存 Social / X 设置</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2060,6 +2336,7 @@ let PWD = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORA
 let activeService = localStorage.getItem(ACTIVE_SERVICE_KEY) || 'tavily';
 let latestServices = {};
 let latestSocial = {};
+let latestSettings = {};
 
 function socialModeLabel(mode) {
   if (mode === 'admin-auto') return '后台自动继承';
@@ -2237,6 +2514,86 @@ async function api(method, path, body) {
   }
 
   return payload;
+}
+
+function setStatus(id, message, isError = false) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!message) {
+    el.textContent = '';
+    el.classList.add('hidden');
+    el.classList.remove('is-error');
+    return;
+  }
+  el.textContent = message;
+  el.classList.remove('hidden');
+  el.classList.toggle('is-error', Boolean(isError));
+}
+
+function describeConfiguredSecret(masked, configured) {
+  if (!configured) return '当前未配置。';
+  return `当前已配置 ${masked || 'secret'}，留空表示保持不变。`;
+}
+
+function fillSettingsForm(settings) {
+  const social = settings?.social || {};
+  document.getElementById('settings-social-upstream-base-url').value = social.upstream_base_url || '';
+  document.getElementById('settings-social-upstream-responses-path').value = social.upstream_responses_path || '/responses';
+  document.getElementById('settings-social-admin-base-url').value = social.admin_base_url || '';
+  document.getElementById('settings-social-admin-verify-path').value = social.admin_verify_path || '/v1/admin/verify';
+  document.getElementById('settings-social-admin-config-path').value = social.admin_config_path || '/v1/admin/config';
+  document.getElementById('settings-social-admin-tokens-path').value = social.admin_tokens_path || '/v1/admin/tokens';
+  document.getElementById('settings-social-model').value = social.model || 'grok-4.1-fast';
+  document.getElementById('settings-social-cache-ttl-seconds').value = String(social.cache_ttl_seconds || 60);
+
+  document.getElementById('settings-social-admin-app-key').value = '';
+  document.getElementById('settings-social-upstream-api-key').value = '';
+  document.getElementById('settings-social-gateway-token').value = '';
+
+  document.getElementById('settings-social-admin-app-key-hint').textContent =
+    describeConfiguredSecret(social.admin_app_key_masked, social.admin_app_key_configured);
+  document.getElementById('settings-social-upstream-api-key-hint').textContent =
+    describeConfiguredSecret(social.upstream_api_key_masked, social.upstream_api_key_configured);
+  document.getElementById('settings-social-gateway-token-hint').textContent =
+    describeConfiguredSecret(social.gateway_token_masked, social.gateway_token_configured);
+
+  const bits = [
+    `当前模式：${socialModeLabel(social.mode || 'manual')}`,
+    social.token_source ? `Token 来源：${social.token_source}` : '',
+    social.admin_connected ? '后台连通正常' : '',
+  ].filter(Boolean);
+  if (social.error) {
+    bits.push(`最近错误：${social.error}`);
+  }
+  document.getElementById('settings-social-meta').textContent = bits.join(' · ');
+}
+
+async function loadSettings() {
+  const payload = await api('GET', '/api/settings');
+  latestSettings = payload || {};
+  fillSettingsForm(latestSettings);
+  setStatus('settings-password-status', '');
+  setStatus('settings-social-status', '');
+}
+
+async function openSettingsModal() {
+  document.getElementById('settings-modal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  try {
+    await loadSettings();
+  } catch (error) {
+    setStatus('settings-social-status', `读取设置失败：${error.message}`, true);
+  }
+}
+
+function closeSettingsModal() {
+  document.getElementById('settings-modal').classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
+
+function logoutFromSettings() {
+  closeSettingsModal();
+  logout();
 }
 
 function renderServiceShells() {
@@ -2566,10 +2923,6 @@ function setActiveService(service) {
   }
 }
 
-function toggleDropdown() {
-  document.getElementById('user-dropdown').classList.toggle('show');
-}
-
 function doLogin(event) {
   event?.preventDefault?.();
   const input = document.getElementById('pwd-input');
@@ -2596,15 +2949,8 @@ function logout() {
   localStorage.removeItem(LEGACY_STORAGE_KEY);
   document.getElementById('dashboard').classList.add('hidden');
   document.getElementById('login-box').classList.remove('hidden');
-  document.getElementById('user-dropdown').classList.remove('show');
+  closeSettingsModal();
 }
-
-document.addEventListener('click', (event) => {
-  const menu = document.querySelector('.user-menu');
-  if (menu && !menu.contains(event.target)) {
-    document.getElementById('user-dropdown').classList.remove('show');
-  }
-});
 
 function fmtNum(value) {
   if (value === null || value === undefined || value === '') {
@@ -3063,19 +3409,54 @@ async function syncUsage(service, force) {
 
 async function changePwd(event) {
   event?.preventDefault?.();
-  const input = document.getElementById('new-pwd');
+  const input = document.getElementById('settings-new-pwd');
   const password = input.value.trim();
   if (password.length < 4) {
-    alert('密码至少 4 位');
+    setStatus('settings-password-status', '密码至少 4 位。', true);
     return;
   }
-  await api('PUT', '/api/password', { password });
-  PWD = password;
-  localStorage.setItem(STORAGE_KEY, password);
-  localStorage.removeItem(LEGACY_STORAGE_KEY);
-  input.value = '';
-  document.getElementById('user-dropdown').classList.remove('show');
-  alert('密码已更新');
+  try {
+    await api('PUT', '/api/password', { password });
+    PWD = password;
+    localStorage.setItem(STORAGE_KEY, password);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    input.value = '';
+    setStatus('settings-password-status', '密码已更新，当前会话也已同步。');
+  } catch (error) {
+    setStatus('settings-password-status', `保存密码失败：${error.message}`, true);
+  }
+}
+
+async function saveSocialSettings(event) {
+  event?.preventDefault?.();
+  const body = {
+    upstream_base_url: document.getElementById('settings-social-upstream-base-url').value.trim(),
+    upstream_responses_path: document.getElementById('settings-social-upstream-responses-path').value.trim(),
+    admin_base_url: document.getElementById('settings-social-admin-base-url').value.trim(),
+    admin_verify_path: document.getElementById('settings-social-admin-verify-path').value.trim(),
+    admin_config_path: document.getElementById('settings-social-admin-config-path').value.trim(),
+    admin_tokens_path: document.getElementById('settings-social-admin-tokens-path').value.trim(),
+    model: document.getElementById('settings-social-model').value.trim(),
+    cache_ttl_seconds: document.getElementById('settings-social-cache-ttl-seconds').value.trim(),
+  };
+
+  const adminAppKey = document.getElementById('settings-social-admin-app-key').value.trim();
+  const upstreamApiKey = document.getElementById('settings-social-upstream-api-key').value.trim();
+  const gatewayToken = document.getElementById('settings-social-gateway-token').value.trim();
+
+  if (adminAppKey) body.admin_app_key = adminAppKey;
+  if (upstreamApiKey) body.upstream_api_key = upstreamApiKey;
+  if (gatewayToken) body.gateway_token = gatewayToken;
+
+  try {
+    const payload = await api('PUT', '/api/settings/social', body);
+    latestSettings = payload || {};
+    fillSettingsForm(latestSettings);
+    setStatus('settings-social-status', 'Social / X 设置已保存，当前控制台状态已刷新。');
+    await refresh();
+  } catch (error) {
+    setStatus('settings-social-status', `保存 Social / X 设置失败：${error.message}`, true);
+  }
 }
 
 function flashButtonLabel(button, label) {
@@ -3095,6 +3476,12 @@ function copyCode(elementId, button) {
 function copyText(value, button) {
   navigator.clipboard.writeText(value).then(() => flashButtonLabel(button, '已复制'));
 }
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !document.getElementById('settings-modal').classList.contains('hidden')) {
+    closeSettingsModal();
+  }
+});
 
 renderServiceShells();
 
