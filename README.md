@@ -13,11 +13,6 @@
   - Key 池、Token 池、额度同步、`/social/search`
 - `skill/`
   - 可直接给智能体安装的 MySearch Skill
-
-同时保留：
-
-- `tests/`
-  - MySearch / social gateway / proxy 相关测试
 - `docs/mysearch-architecture.md`
   - 架构说明
 
@@ -30,7 +25,6 @@ MySearch-Proxy/
 ├── mysearch/
 ├── proxy/
 ├── skill/
-├── tests/
 └── install.sh
 ```
 
@@ -94,14 +88,3 @@ uvicorn server:app --host 0.0.0.0 --port 9874
 - [proxy/README.md](./proxy/README.md)
 - [docs/mysearch-architecture.md](./docs/mysearch-architecture.md)
 - [skill/SKILL.md](./skill/SKILL.md)
-
-## 隐私与发布
-
-这个仓库默认只保留通用代码和示例配置，不应提交：
-
-- 真实 `.env`
-- `proxy/data/`
-- `accounts.txt`、`firecrawl_accounts.txt`
-- 任何真实 token、key、个人路径或运行时数据库
-
-根目录 `.gitignore` 已经把这些内容排除了，发布前仍建议再做一轮检查。
