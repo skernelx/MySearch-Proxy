@@ -237,14 +237,26 @@ class MySearchClient:
     ) -> dict[str, Any]:
         formats = formats or ["markdown"]
         errors: list[str] = []
+        firecrawl_warning = ""
 
         if provider in {"auto", "firecrawl"}:
             try:
-                return self._scrape_firecrawl(
+                firecrawl_result = self._scrape_firecrawl(
                     url=url,
                     formats=formats,
                     only_main_content=only_main_content,
                 )
+                if self._has_meaningful_extract_content(firecrawl_result):
+                    return firecrawl_result
+
+                firecrawl_warning = "firecrawl scrape returned empty content"
+                errors.append(firecrawl_warning)
+
+                if provider == "firecrawl":
+                    return self._annotate_extract_warning(
+                        firecrawl_result,
+                        warning=firecrawl_warning,
+                    )
             except MySearchError as exc:
                 errors.append(f"firecrawl scrape failed: {exc}")
                 if provider == "firecrawl":
@@ -252,7 +264,14 @@ class MySearchClient:
 
         if provider in {"auto", "tavily"}:
             try:
-                return self._extract_tavily(url=url)
+                tavily_result = self._extract_tavily(url=url)
+                if provider == "auto" and errors:
+                    return self._annotate_extract_fallback(
+                        tavily_result,
+                        fallback_from="firecrawl",
+                        fallback_reason=" | ".join(errors),
+                    )
+                return tavily_result
             except MySearchError as exc:
                 errors.append(f"tavily extract failed: {exc}")
                 if provider == "tavily":
@@ -916,6 +935,41 @@ class MySearchClient:
                 "failed_results": response.get("failed_results") or [],
             },
         }
+
+    def _has_meaningful_extract_content(self, result: dict[str, Any]) -> bool:
+        content = result.get("content")
+        return isinstance(content, str) and bool(content.strip())
+
+    def _annotate_extract_warning(
+        self,
+        result: dict[str, Any],
+        *,
+        warning: str,
+    ) -> dict[str, Any]:
+        annotated = dict(result)
+        metadata = dict(annotated.get("metadata") or {})
+        metadata["warning"] = warning
+        annotated["metadata"] = metadata
+        annotated["warning"] = warning
+        return annotated
+
+    def _annotate_extract_fallback(
+        self,
+        result: dict[str, Any],
+        *,
+        fallback_from: str,
+        fallback_reason: str,
+    ) -> dict[str, Any]:
+        annotated = dict(result)
+        metadata = dict(annotated.get("metadata") or {})
+        metadata["fallback_from"] = fallback_from
+        metadata["fallback_reason"] = fallback_reason
+        annotated["metadata"] = metadata
+        annotated["fallback"] = {
+            "from": fallback_from,
+            "reason": fallback_reason,
+        }
+        return annotated
 
     def _build_xai_responses_payload(
         self,

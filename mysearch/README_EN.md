@@ -25,6 +25,9 @@ Its product boundary is:
 - `research`
 - `mysearch_health`
 
+`extract_url` prefers `Firecrawl` first, and automatically falls back to
+`Tavily extract` when Firecrawl fails or returns empty content.
+
 ## Default Routing
 
 - General web search -> Tavily

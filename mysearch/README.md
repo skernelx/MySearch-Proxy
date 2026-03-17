@@ -25,6 +25,9 @@
 - `research`
 - `mysearch_health`
 
+`extract_url` 默认优先 `Firecrawl`，如果抓取失败或返回空正文，会自动回退到
+`Tavily extract`。
+
 ## 自动路由
 
 - 普通网页检索 -> Tavily

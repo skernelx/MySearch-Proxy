@@ -73,7 +73,7 @@ def extract_url(
     only_main_content: bool = True,
     provider: Literal["auto", "firecrawl", "tavily"] = "auto",
 ) -> dict:
-    """抓取单个 URL 的正文，默认优先 Firecrawl，失败回退 Tavily extract。"""
+    """抓取单个 URL 的正文，默认优先 Firecrawl；失败或空正文时回退 Tavily extract。"""
     return CLIENT.extract_url(
         url=url,
         formats=formats,
