@@ -157,7 +157,9 @@ install_runtime_from_repo() {
 }
 
 install_env_file() {
-  install -m 0644 "$SOURCE_DIR/.env.example" "$TARGET_DIR/.env.example"
+  if [[ "$SOURCE_DIR/.env.example" != "$TARGET_DIR/.env.example" ]]; then
+    install -m 0644 "$SOURCE_DIR/.env.example" "$TARGET_DIR/.env.example"
+  fi
 
   if [[ -n "$COPY_ENV" ]]; then
     install -m 0600 "$COPY_ENV" "$TARGET_DIR/.env"
@@ -173,7 +175,8 @@ install_venv() {
   local python_bin="$TARGET_DIR/.venv/bin/python"
   python3 -m venv "$TARGET_DIR/.venv"
   "$python_bin" -m pip install --upgrade pip >/dev/null
-  "$python_bin" -m pip install -r "$TARGET_DIR/runtime/mysearch/requirements.txt"
+  # OpenClaw skill runtime only needs requests; the MCP server stack is not required here.
+  "$python_bin" -m pip install requests==2.32.5
 }
 
 copy_skill_skeleton
