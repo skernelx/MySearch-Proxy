@@ -47,6 +47,10 @@ body {
     linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 100%);
 }
 
+body.app-booting {
+  overflow-y: hidden;
+}
+
 body::before,
 body::after {
   content: "";
@@ -1239,6 +1243,56 @@ tr:last-child td { border-bottom: none; }
   padding: 28px;
 }
 
+.boot-screen {
+  width: min(440px, calc(100% - 32px));
+  margin: 120px auto;
+  padding: 26px 28px;
+  position: relative;
+  z-index: 2;
+}
+
+.boot-kicker {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.boot-screen h2 {
+  font-size: 28px;
+  margin-bottom: 10px;
+}
+
+.boot-screen p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.boot-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  color: var(--text-soft);
+  font-size: 14px;
+}
+
+.boot-indicator::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--tavily), var(--firecrawl));
+  box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.22);
+  animation: bootPulse 1.25s ease-out infinite;
+}
+
+body.app-booting #login-box,
+body.app-booting #dashboard {
+  display: none !important;
+}
+
 .auth h2 {
   font-size: 28px;
   margin-bottom: 10px;
@@ -1260,6 +1314,21 @@ tr:last-child td { border-bottom: none; }
   color: var(--danger);
   font-size: 13px;
   margin-top: 8px;
+}
+
+@keyframes bootPulse {
+  0% {
+    transform: scale(0.9);
+    box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.22);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 10px rgba(15, 118, 110, 0);
+  }
+  100% {
+    transform: scale(0.9);
+    box-shadow: 0 0 0 0 rgba(15, 118, 110, 0);
+  }
 }
 
 @media (max-width: 1080px) {
@@ -2125,7 +2194,14 @@ textarea:focus {
 }
 </style>
 </head>
-<body>
+<body class="app-booting">
+
+<div id="boot-screen" class="boot-screen card">
+  <div class="boot-kicker">MySearch Proxy</div>
+  <h2>正在进入控制台</h2>
+  <p>正在检查当前登录状态和工作台配置，刷新后会直接回到正确页面，不再先闪出登录卡片。</p>
+  <div class="boot-indicator">正在同步当前会话...</div>
+</div>
 
 <div id="login-box" class="auth card">
   <div class="auth-kicker">MySearch Proxy</div>
@@ -2408,16 +2484,23 @@ function setLoginBusy(isBusy) {
   }
 }
 
+function finishBoot() {
+  document.body.classList.remove('app-booting');
+  document.getElementById('boot-screen').classList.add('hidden');
+}
+
 function showDashboard() {
   document.getElementById('login-err').classList.add('hidden');
   document.getElementById('login-box').classList.add('hidden');
   document.getElementById('dashboard').classList.remove('hidden');
+  finishBoot();
 }
 
 function showLogin() {
   document.getElementById('dashboard').classList.add('hidden');
   document.getElementById('login-box').classList.remove('hidden');
   setLoginBusy(false);
+  finishBoot();
 }
 
 async function fetchSession(method, path, body) {
