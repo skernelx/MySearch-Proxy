@@ -9,14 +9,16 @@ import string
 from datetime import datetime, timezone
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "proxy.db")
-SUPPORTED_SERVICES = ("tavily", "firecrawl")
+SUPPORTED_SERVICES = ("tavily", "firecrawl", "exa")
 TOKEN_PREFIX = {
     "tavily": "tvly-",
     "firecrawl": "fctk-",
+    "exa": "exat-",
 }
 KEY_PATTERNS = {
     "tavily": r"(tvly-[A-Za-z0-9\-_]{20,})",
     "firecrawl": r"(fc-[A-Za-z0-9\-_]{20,})",
+    "exa": r"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})",
 }
 
 KEY_USAGE_COLUMNS = {

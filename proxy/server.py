@@ -23,6 +23,7 @@ ADMIN_SESSION_COOKIE = os.environ.get("ADMIN_SESSION_COOKIE", "mysearch_proxy_se
 ADMIN_SESSION_MAX_AGE = max(300, int(os.environ.get("ADMIN_SESSION_MAX_AGE", "2592000")))
 TAVILY_API_BASE = "https://api.tavily.com"
 FIRECRAWL_API_BASE = "https://api.firecrawl.dev"
+EXA_API_BASE = "https://api.exa.ai"
 
 
 def _normalize_path(value, default):
@@ -75,9 +76,10 @@ USAGE_SYNC_CONCURRENCY = max(1, int(os.environ.get("USAGE_SYNC_CONCURRENCY", "4"
 SERVICE_LABELS = {
     "tavily": "Tavily",
     "firecrawl": "Firecrawl",
+    "exa": "Exa",
 }
 
-app = FastAPI(title="Tavily / Firecrawl API Proxy")
+app = FastAPI(title="MySearch Proxy")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 http_client = httpx.AsyncClient(timeout=60)
 social_gateway_state_cache = {"expires_at": 0.0, "value": None}
@@ -643,6 +645,23 @@ async def sync_usage_for_key_row(key_row):
 
 
 async def sync_usage_cache(force=False, key_id=None, service=None):
+    if service == "exa":
+        rows = []
+        if key_id is not None:
+            row = db.get_key_by_id(key_id)
+            if row and row["service"] == "exa":
+                rows = [dict(row)]
+        else:
+            rows = [dict(row) for row in db.get_all_keys("exa")]
+        return {
+            "requested": len(rows),
+            "synced": 0,
+            "skipped": len(rows),
+            "errors": 0,
+            "supported": False,
+            "detail": "Exa 当前未接入官方额度同步",
+        }
+
     rows = []
     if key_id is not None:
         row = db.get_key_by_id(key_id)
@@ -818,6 +837,24 @@ def build_forward_headers(request, real_key):
         if key.lower() not in skip_headers
     }
     headers["Authorization"] = f"Bearer {real_key}"
+    return headers
+
+
+def build_exa_forward_headers(request, real_key):
+    skip_headers = {
+        "authorization",
+        "content-length",
+        "host",
+        "x-admin-password",
+        "x-api-key",
+    }
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in skip_headers
+    }
+    headers["x-api-key"] = real_key
+    headers.setdefault("Content-Type", "application/json")
     return headers
 
 
@@ -1197,6 +1234,55 @@ async def proxy_firecrawl(path: str, request: Request):
         raise HTTPException(status_code=502, detail=str(exc))
 
 
+@app.post("/exa/search")
+async def proxy_exa_search(request: Request):
+    raw_body, body_json = await parse_json_body(request)
+    token_value = extract_token(request, body_json)
+    token_row = get_token_row_or_401(token_value, "exa")
+
+    ok, reason = db.check_quota(
+        token_row["id"],
+        token_row["hourly_limit"],
+        token_row["daily_limit"],
+        token_row["monthly_limit"],
+        service="exa",
+    )
+    if not ok:
+        raise HTTPException(status_code=429, detail=reason)
+
+    key_info = pool.get_next_key("exa")
+    if not key_info:
+        raise HTTPException(status_code=503, detail="No available API keys")
+
+    forward_content = raw_body
+    if body_json is not None:
+        sanitized_body = dict(body_json)
+        sanitized_body.pop("api_key", None)
+        forward_content = json.dumps(sanitized_body).encode("utf-8")
+
+    start = time.time()
+    try:
+        resp = await http_client.post(
+            f"{EXA_API_BASE}/search",
+            params=dict(request.query_params),
+            content=forward_content,
+            headers=build_exa_forward_headers(request, key_info["key"]),
+        )
+        latency = int((time.time() - start) * 1000)
+        success = resp.status_code < 400
+        pool.report_result("exa", key_info["id"], success)
+        db.log_usage(token_row["id"], key_info["id"], "search", int(success), latency, service="exa")
+        content_type = resp.headers.get("content-type", "").lower()
+        if "application/json" in content_type:
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return forward_raw_response(resp)
+    except Exception as exc:
+        latency = int((time.time() - start) * 1000)
+        pool.report_result("exa", key_info["id"], False)
+        db.log_usage(token_row["id"], key_info["id"], "search", 0, latency, service="exa")
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 # ═══ Social / X 代理端点 ═══
 
 @app.get("/social/health")
@@ -1315,15 +1401,17 @@ async def logout_session():
 
 @app.get("/api/stats")
 async def stats(request: Request, _=Depends(verify_admin)):
-    tavily_stats, firecrawl_stats, social_stats = await asyncio.gather(
+    tavily_stats, firecrawl_stats, exa_stats, social_stats = await asyncio.gather(
         build_service_dashboard("tavily"),
         build_service_dashboard("firecrawl"),
+        build_service_dashboard("exa"),
         build_social_dashboard(),
     )
     return {
         "services": {
             "tavily": tavily_stats,
             "firecrawl": firecrawl_stats,
+            "exa": exa_stats,
         },
         "social": social_stats,
     }

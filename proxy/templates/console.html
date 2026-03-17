@@ -24,6 +24,8 @@
   --radius-sm: 12px;
   --tavily: #0f766e;
   --tavily-soft: rgba(15, 118, 110, 0.10);
+  --exa: #0f5fd7;
+  --exa-soft: rgba(15, 95, 215, 0.10);
   --firecrawl: #b45309;
   --firecrawl-soft: rgba(180, 83, 9, 0.10);
   --ok: #15803d;
@@ -43,6 +45,7 @@ body {
   color: var(--text);
   background:
     radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 28%),
+    radial-gradient(circle at 48% 0%, rgba(15, 95, 215, 0.12), transparent 18%),
     radial-gradient(circle at 85% 10%, rgba(180, 83, 9, 0.16), transparent 22%),
     linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 100%);
 }
@@ -170,7 +173,7 @@ body::after {
 
 .hero-usage-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   margin-top: 18px;
 }
@@ -229,6 +232,12 @@ body::after {
   border: 1px solid rgba(15, 118, 110, 0.14);
 }
 
+.service-chip[data-service="exa"] {
+  background: var(--exa-soft);
+  color: var(--exa);
+  border: 1px solid rgba(15, 95, 215, 0.14);
+}
+
 .service-chip[data-service="firecrawl"] {
   background: var(--firecrawl-soft);
   color: var(--firecrawl);
@@ -271,6 +280,14 @@ body::after {
 .user-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.btn:disabled,
+.user-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 .btn-primary {
@@ -744,7 +761,7 @@ body.modal-open {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 16px;
 }
 
@@ -799,12 +816,20 @@ body.modal-open {
   background: linear-gradient(90deg, #0f766e, #14b8a6);
 }
 
+.service-toggle[data-service="exa"]::before {
+  background: linear-gradient(90deg, #0f5fd7, #60a5fa);
+}
+
 .service-toggle[data-service="firecrawl"]::before {
   background: linear-gradient(90deg, #b45309, #fb923c);
 }
 
 .service-toggle[data-service="tavily"]::after {
   background: var(--tavily-soft);
+}
+
+.service-toggle[data-service="exa"]::after {
+  background: var(--exa-soft);
 }
 
 .service-toggle[data-service="firecrawl"]::after {
@@ -819,6 +844,16 @@ body.modal-open {
   box-shadow:
     0 24px 56px rgba(15, 23, 42, 0.14),
     0 0 0 1px rgba(15, 118, 110, 0.10);
+}
+
+.service-toggle.is-active[data-service="exa"] {
+  border-color: rgba(15, 95, 215, 0.22);
+  background:
+    linear-gradient(135deg, rgba(15, 95, 215, 0.16), rgba(255, 255, 255, 0.94)),
+    radial-gradient(circle at top right, rgba(15, 95, 215, 0.12), transparent 40%);
+  box-shadow:
+    0 24px 56px rgba(15, 23, 42, 0.14),
+    0 0 0 1px rgba(15, 95, 215, 0.10);
 }
 
 .service-toggle.is-active[data-service="firecrawl"] {
@@ -1013,6 +1048,10 @@ body.modal-open {
   border-top: 6px solid var(--tavily);
 }
 
+.service-panel[data-service="exa"] {
+  border-top: 6px solid var(--exa);
+}
+
 .service-panel[data-service="firecrawl"] {
   border-top: 6px solid var(--firecrawl);
 }
@@ -1073,6 +1112,108 @@ body.modal-open {
   grid-template-columns: 1.05fr 1.25fr;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.workspace-spotlight {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.15fr);
+  gap: 16px;
+}
+
+.workspace-spotlight-card {
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.86));
+}
+
+.workspace-spotlight-card[data-service="tavily"] {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(233, 251, 248, 0.92)),
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.10), transparent 46%);
+}
+
+.workspace-spotlight-card[data-service="exa"] {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(235, 244, 255, 0.92)),
+    radial-gradient(circle at top right, rgba(15, 95, 215, 0.10), transparent 46%);
+}
+
+.workspace-spotlight-card[data-service="firecrawl"] {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 244, 232, 0.92)),
+    radial-gradient(circle at top right, rgba(180, 83, 9, 0.10), transparent 46%);
+}
+
+.workspace-spotlight-card[data-service="social"] {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(238, 241, 255, 0.92)),
+    radial-gradient(circle at top right, rgba(91, 120, 246, 0.10), transparent 46%);
+}
+
+.workspace-spotlight-kicker {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.workspace-spotlight-title {
+  font-size: 30px;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin-bottom: 10px;
+}
+
+.workspace-spotlight-desc {
+  color: var(--text-soft);
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+.workspace-spotlight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workspace-spotlight-metric {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.workspace-spotlight-metric .label {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.workspace-spotlight-metric .value {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.workspace-spotlight-foot {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-spotlight-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.06);
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .subcard {
@@ -1351,6 +1492,8 @@ tr:last-child td { border-bottom: none; }
   --radius-sm: 16px;
   --tavily: #0d7a73;
   --tavily-soft: rgba(13, 122, 115, 0.12);
+  --exa: #1c67dd;
+  --exa-soft: rgba(28, 103, 221, 0.12);
   --firecrawl: #c46f1c;
   --firecrawl-soft: rgba(196, 111, 28, 0.12);
   --social: #5b78f6;
@@ -1478,15 +1621,15 @@ h3,
 
 .hero-lanes {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 28px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 24px;
 }
 
 .hero-lane {
-  min-height: 154px;
-  padding: 18px;
-  border-radius: 22px;
+  min-height: 132px;
+  padding: 16px 16px 15px;
+  border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.04));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -1494,7 +1637,7 @@ h3,
 
 .hero-lane-kicker {
   display: inline-flex;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   color: rgba(226, 232, 240, 0.68);
   font-size: 10px;
   font-weight: 700;
@@ -1504,17 +1647,18 @@ h3,
 
 .hero-lane strong {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   color: #f8fafc;
   font-family: "Sora", "Avenir Next", "PingFang SC", sans-serif;
-  font-size: 18px;
+  font-size: 16px;
+  line-height: 1.25;
   letter-spacing: -0.02em;
 }
 
 .hero-lane p {
   color: rgba(226, 232, 240, 0.74);
-  font-size: 13px;
-  line-height: 1.65;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .hero .subcard {
@@ -1851,6 +1995,10 @@ h3,
   border: 1px solid rgba(91, 120, 246, 0.18);
 }
 
+.service-panel[data-service="exa"]::before {
+  background: linear-gradient(90deg, #1c67dd, #7cb8ff);
+}
+
 .service-toggle[data-service="social"]::before {
   background: linear-gradient(90deg, #5b78f6, #91a6ff);
 }
@@ -2098,7 +2246,7 @@ textarea:focus {
   }
 
   .hero-lanes {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .credit-strip {
@@ -2111,6 +2259,10 @@ textarea:focus {
 }
 
 @media (max-width: 720px) {
+  .hero-lanes {
+    grid-template-columns: 1fr;
+  }
+
   .auth {
     margin: 8vh auto;
     padding: 24px;
@@ -2137,6 +2289,14 @@ textarea:focus {
   .subcard {
     border-radius: 20px;
   }
+
+  .workspace-spotlight {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-spotlight-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 </head>
@@ -2145,7 +2305,7 @@ textarea:focus {
 <div id="login-box" class="auth card{% if initial_authenticated %} hidden{% endif %}">
   <div class="auth-kicker">MySearch Proxy</div>
   <h2>Search Infrastructure Console</h2>
-  <p>把 Tavily、Firecrawl 和 Social / X 接入放进同一块工作台里，适合你自己用，也适合直接公开给团队或社区部署。</p>
+  <p>把 Tavily、Exa、Firecrawl 和 Social / X 接入放进同一块工作台里，适合你自己用，也适合直接公开给团队或社区部署。</p>
   <form class="stack" onsubmit="doLogin(event)">
     <input type="text" name="proxy-admin-user" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;opacity:0;pointer-events:none;height:0">
     <input type="password" id="pwd-input" placeholder="输入管理密码" autocomplete="current-password">
@@ -2175,12 +2335,16 @@ textarea:focus {
         <div class="hero-main">
           <div class="hero-copy">
             <h1>把搜索基础设施做成真正可交付的工作台</h1>
-            <p class="hero-intro">MySearch 把 Tavily、Firecrawl 和 Social / X 统一成一套可被 Codex、Claude Code 和团队 Agent 直接调用的搜索入口。使用者拿到后，不需要自己维护多套 provider、兼容网关和结果结构，也不需要每次手动判断这一轮该用网页搜索、正文抓取还是社交舆情。</p>
+            <p class="hero-intro">MySearch 把 Tavily、Exa、Firecrawl 和 Social / X 统一成一套可被 Codex、Claude Code 和团队 Agent 直接调用的搜索入口。使用者拿到后，不需要自己维护多套 provider、兼容网关和结果结构，也不需要每次手动判断这一轮该用网页搜索、正文抓取还是社交舆情。</p>
 
             <div class="hero-usage-grid">
               <div class="hero-usage-card">
                 <strong>统一入口</strong>
                 <span>网页发现、正文抓取、社交舆情走同一套接线方式。</span>
+              </div>
+              <div class="hero-usage-card">
+                <strong>Exa 工作区</strong>
+                <span>把 Exa 独立成可发 Token、可管 Key、可直接代理调用的新栏目。</span>
               </div>
               <div class="hero-usage-card">
                 <strong>统一运维</strong>
@@ -2199,6 +2363,11 @@ textarea:focus {
             <span class="hero-lane-kicker">Router</span>
             <strong>Tavily 做发现</strong>
             <p>适合新闻、快速 answer、网页线索收集，放在 MySearch 的第一层路由里。</p>
+          </article>
+          <article class="hero-lane">
+            <span class="hero-lane-kicker">Search</span>
+            <strong>Exa 做网页发现</strong>
+            <p>适合补 Tavily 之外的网页搜索入口，这里收成独立 Key 池、Token 池和代理端点。</p>
           </article>
           <article class="hero-lane">
             <span class="hero-lane-kicker">Depth</span>
@@ -2252,6 +2421,7 @@ textarea:focus {
         <div class="switcher-note" id="switcher-note">已记住上次打开的工作台</div>
       </div>
       <section class="service-switcher" id="service-switcher"></section>
+      <div class="workspace-spotlight" id="workspace-spotlight"></div>
     </section>
 
     <div id="services-root"></div>
@@ -2379,6 +2549,30 @@ const SERVICE_META = {
     quotaSource: '真实额度来自 Tavily 官方 GET /usage',
     routeHint: '代理端点: POST /api/search, POST /api/extract',
     syncButton: '同步 Tavily 额度',
+    syncSupported: true,
+    panelIntro: '适合新闻、网页线索和基础搜索入口，继续保留现有 Tavily 工作台逻辑不动。',
+    tokenPoolDesc: '给业务侧发放 Tavily 代理 Token，和 Exa / Firecrawl 完全分开创建、限流、统计。',
+    keyPoolDesc: 'Tavily Key 独立存储，导入时只写入 Tavily 池，不会和 Exa 或 Firecrawl 混用。',
+    switcherBadges: ['Search', '网页发现', '官方额度同步'],
+    switcherFoot: '独立 Key 池 + 独立额度同步',
+    spotlightDesc: 'Tavily 继续负责第一层网页发现，这一栏保留现有功能与额度同步逻辑。',
+  },
+  exa: {
+    label: 'Exa',
+    emailPrefix: 'exa-',
+    tokenPrefix: 'exat-',
+    keyPlaceholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+    importPlaceholder: '支持粘贴 email,password,uuid,timestamp 或仅 UUID Key，每行一条',
+    quotaSource: 'Exa 当前未接入官方额度同步，控制台先展示独立代理调用统计',
+    routeHint: '代理端点: POST /exa/search',
+    syncButton: 'Exa 暂不支持同步',
+    syncSupported: false,
+    panelIntro: '适合补充网页发现入口，已经独立成 Exa 工作台、Exa Key 池和 Exa Token 池。',
+    tokenPoolDesc: '给业务侧发放 Exa 代理 Token，和 Tavily / Firecrawl 完全分开创建、限流、统计。',
+    keyPoolDesc: 'Exa Key 独立存储，支持直接导入 UUID key，不和别的服务共用池子。',
+    switcherBadges: ['Search', '网页发现', '代理统计'],
+    switcherFoot: '独立 Key 池 + 独立代理统计',
+    spotlightDesc: 'Exa 已经收成单独工作台，现在可以单独导入 Key、签发 Token，并通过 /exa/search 直接代理搜索。',
   },
   firecrawl: {
     label: 'Firecrawl',
@@ -2389,6 +2583,13 @@ const SERVICE_META = {
     quotaSource: '真实额度来自 Firecrawl /v2/team/credit-usage',
     routeHint: '代理端点: /firecrawl/*，例如 POST /firecrawl/v2/scrape',
     syncButton: '同步 Firecrawl 额度',
+    syncSupported: true,
+    panelIntro: '适合正文抓取、文档页、PDF 和结构化抽取，继续保持独立 Firecrawl 工作台。',
+    tokenPoolDesc: '给业务侧发放 Firecrawl 代理 Token，和 Tavily / Exa 完全分开创建、限流、统计。',
+    keyPoolDesc: 'Firecrawl Key 独立存储，导入时只写入 Firecrawl 池，不会和其他服务混用。',
+    switcherBadges: ['Depth', '正文抓取', '官方额度同步'],
+    switcherFoot: '独立 Key 池 + 独立额度同步',
+    spotlightDesc: 'Firecrawl 继续负责正文抓取与页面抽取，额度同步仍按 Firecrawl credits 展示。',
   },
 };
 
@@ -2400,6 +2601,9 @@ const WORKSPACE_META = {
     tokenPrefix: 'shared auth',
     routeHint: '代理端点: POST /social/search',
     quotaSource: 'grok2api / xAI-compatible social router',
+    switcherBadges: ['X Search', 'compatible', '自动继承'],
+    switcherFoot: '统一 Social 路由 + 统一输出结构',
+    spotlightDesc: 'Social / X 工作台负责舆情路由和 token 池映射，对外统一暴露 /social/search。',
   },
 };
 
@@ -2819,7 +3023,7 @@ function renderServiceShells() {
           <div>
             <span class="service-chip" data-service="${service}">${meta.label}</span>
             <h2>${meta.label} 栏目</h2>
-            <p>邮箱别名前缀 ${meta.emailPrefix}，代理 Token 前缀 ${meta.tokenPrefix}。${meta.quotaSource}。</p>
+            <p>${meta.panelIntro} 账号前缀 ${meta.emailPrefix}，代理 Token 前缀 ${meta.tokenPrefix}。${meta.quotaSource}。</p>
           </div>
           <div class="service-tools">
             <div id="sync-meta-${service}" class="service-sync-meta">等待同步状态...</div>
@@ -2846,7 +3050,7 @@ function renderServiceShells() {
 
             <div class="subcard">
               <h3>Token 池</h3>
-              <p class="desc">给业务侧发放代理 Token。Tavily 和 Firecrawl 分开创建、分开限流、分开统计。</p>
+              <p class="desc">${meta.tokenPoolDesc}</p>
               <div class="form-row">
                 <input class="input-grow" type="text" id="token-name-${service}" placeholder="Token 备注（可选）">
                 <button class="btn btn-primary" onclick="createToken('${service}')">创建 ${meta.label} Token</button>
@@ -2870,7 +3074,7 @@ function renderServiceShells() {
 
           <div class="subcard">
             <h3>API Key 池</h3>
-            <p class="desc">服务隔离存储，导入时会按当前栏目写入数据库。不会再和另一种服务共用一套 Key 池。</p>
+            <p class="desc">${meta.keyPoolDesc}</p>
             <div class="form-row">
               <input class="input-grow mono" type="text" id="single-key-${service}" placeholder="${meta.keyPlaceholder}">
               <button class="btn btn-primary" onclick="addSingleKey('${service}')">添加 ${meta.label} Key</button>
@@ -2946,14 +3150,17 @@ function renderServiceSwitcher(services, social) {
     const activeKeys = isSocial ? (socialStats.token_normal || 0) : (payload.keys_active || 0);
     const tokenCount = isSocial ? (socialStats.token_total || 0) : ((payload.tokens || []).length);
     const todayCount = isSocial ? (socialStats.total_calls || 0) : (payload.overview?.today_count || 0);
-    const badgeOne = isSocial ? 'X Search' : `账号 ${meta.emailPrefix}`;
-    const badgeTwo = isSocial ? 'compatible' : `Token ${meta.tokenPrefix}`;
-    const badgeThree = isSocial ? '自动继承' : '池子独立';
-    const foot = isSocial ? '统一 Social 路由 + 统一输出结构' : '独立 Key 池 + 独立额度同步';
+    const badgeList = meta.switcherBadges || [
+      isSocial ? 'X Search' : `账号 ${meta.emailPrefix}`,
+      isSocial ? 'compatible' : `Token ${meta.tokenPrefix}`,
+      isSocial ? '自动继承' : '池子独立',
+    ];
+    const foot = meta.switcherFoot || (isSocial ? '统一 Social 路由 + 统一输出结构' : '独立 Key 池 + 独立额度同步');
     const metricOneLabel = isSocial ? '可用 Token' : '活跃 Key';
     const metricTwoLabel = 'Token';
     const metricThreeLabel = isSocial ? '总调用' : '今日调用';
-    const metricFourLabel = isSocial ? 'Chat 剩余' : '真实剩余';
+    const metricFourLabel = isSocial ? 'Chat 剩余' : (service === 'exa' ? '官方额度' : '真实剩余');
+    const metricFourValue = isSocial ? fmtNum(remaining) : (service === 'exa' ? '未接入' : fmtNum(remaining));
 
     return `
       <button
@@ -2986,13 +3193,11 @@ function renderServiceSwitcher(services, social) {
           </div>
           <div class="service-toggle-metric">
             <div class="label">${metricFourLabel}</div>
-            <div class="value">${fmtNum(remaining)}</div>
+            <div class="value">${metricFourValue}</div>
           </div>
         </div>
         <div class="service-toggle-badges">
-          <span class="service-toggle-badge">${badgeOne}</span>
-          <span class="service-toggle-badge">${badgeTwo}</span>
-          <span class="service-toggle-badge">${badgeThree}</span>
+          ${badgeList.map((badge) => `<span class="service-toggle-badge">${escapeHtml(badge)}</span>`).join('')}
         </div>
         <div class="service-toggle-foot">
           <span>${foot}</span>
@@ -3034,6 +3239,8 @@ function applyActiveService() {
   if (switcherNote) {
     switcherNote.textContent = `当前工作台：${WORKSPACE_META[activeService].label} · 已记住你的切换偏好`;
   }
+
+  renderWorkspaceSpotlight(latestServices, latestSocial);
 }
 
 function setActiveService(service) {
@@ -3143,6 +3350,19 @@ curl -X POST ${baseUrl}/firecrawl/v2/scrape \\
   -d '{"api_key":"${token}","url":"https://example.com"}'`;
   }
 
+  if (service === 'exa') {
+    return `# Exa Search
+curl -X POST ${baseUrl}/exa/search \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${token}" \\
+  -d '{"query":"OpenAI latest model","numResults":3,"contents":{"text":true}}'
+
+# 也支持 body 里传 api_key
+curl -X POST ${baseUrl}/exa/search \\
+  -H "Content-Type: application/json" \\
+  -d '{"api_key":"${token}","query":"OpenAI latest model","numResults":3}'`;
+  }
+
   return `# Tavily Search
 curl -X POST ${baseUrl}/api/search \\
   -H "Content-Type: application/json" \\
@@ -3161,13 +3381,84 @@ curl -X POST ${baseUrl}/api/search \\
   -d '{"api_key":"${token}","query":"hello world"}'`;
 }
 
+function renderWorkspaceSpotlight(services, social) {
+  const root = document.getElementById('workspace-spotlight');
+  const meta = WORKSPACE_META[activeService];
+  if (!root || !meta) return;
+
+  let metrics = [];
+  let summary = meta.spotlightDesc || meta.routeHint;
+
+  if (activeService === 'social') {
+    const stats = social?.stats || {};
+    metrics = [
+      { label: '可用 Token', value: `${fmtNum(stats.token_normal || 0)} / ${fmtNum(stats.token_total || 0)}` },
+      { label: 'Chat 剩余', value: fmtNum(stats.chat_remaining || 0) },
+      { label: '总调用', value: fmtNum(stats.total_calls || 0) },
+      { label: '工作模式', value: socialModeLabel(social?.mode || 'manual') },
+    ];
+    summary = social?.admin_connected
+      ? '当前已接入后台自动继承，可以直接在这里查看 token 池、调用次数和客户端接线状态。'
+      : '当前还没有完全接入后台自动继承，但 Social / X 工作台结构已经就位。';
+  } else {
+    const payload = services?.[activeService] || {};
+    const overview = payload.overview || {};
+    const quota = payload.real_quota || {};
+    const tokenCount = (payload.tokens || []).length;
+
+    if (activeService === 'exa') {
+      metrics = [
+        { label: '活跃 Key', value: `${fmtNum(payload.keys_active || 0)} / ${fmtNum(payload.keys_total || 0)}` },
+        { label: '代理 Token', value: fmtNum(tokenCount) },
+        { label: '今日调用', value: fmtNum(overview.today_count || 0) },
+        { label: '官方额度', value: '未接入' },
+      ];
+      summary = payload.usage_sync?.detail || meta.spotlightDesc;
+    } else {
+      metrics = [
+        { label: '活跃 Key', value: `${fmtNum(payload.keys_active || 0)} / ${fmtNum(payload.keys_total || 0)}` },
+        { label: '代理 Token', value: fmtNum(tokenCount) },
+        { label: '今日调用', value: fmtNum(overview.today_count || 0) },
+        { label: '真实剩余', value: fmtNum(quota.total_remaining || 0) },
+      ];
+      summary = quota.last_synced_at
+        ? `最近同步时间：${formatTime(quota.last_synced_at)}`
+        : meta.spotlightDesc;
+    }
+  }
+
+  const badges = (meta.switcherBadges || []).map((badge) => `<span class="workspace-spotlight-badge">${escapeHtml(badge)}</span>`).join('');
+  const metricsHtml = metrics.map((item) => `
+    <div class="workspace-spotlight-metric">
+      <div class="label">${escapeHtml(item.label)}</div>
+      <div class="value">${escapeHtml(item.value)}</div>
+    </div>
+  `).join('');
+
+  root.innerHTML = `
+    <article class="workspace-spotlight-card" data-service="${activeService}">
+      <div class="workspace-spotlight-kicker">Current Workspace</div>
+      <div class="workspace-spotlight-title">${meta.label}</div>
+      <div class="workspace-spotlight-desc">${escapeHtml(meta.spotlightDesc || meta.routeHint)}</div>
+      <div class="workspace-spotlight-foot">${badges}</div>
+    </article>
+    <article class="workspace-spotlight-card" data-service="${activeService}">
+      <div class="workspace-spotlight-kicker">Live Snapshot</div>
+      <div class="workspace-spotlight-grid">${metricsHtml}</div>
+      <div class="workspace-spotlight-desc" style="margin-top:14px">${escapeHtml(summary)}</div>
+    </article>
+  `;
+}
+
 function renderGlobalSummary(services, social) {
   const list = Object.values(services || {});
   const totalKeys = list.reduce((sum, item) => sum + Number(item.keys_total || 0), 0);
   const totalTokens = list.reduce((sum, item) => sum + Number((item.tokens || []).length), 0);
   const todayCount = list.reduce((sum, item) => sum + Number(item.overview?.today_count || 0), 0);
-  const realRemaining = list.reduce((sum, item) => sum + Number(item.real_quota?.total_remaining || 0), 0);
-  const syncedKeys = list.reduce((sum, item) => sum + Number(item.real_quota?.synced_keys || 0), 0);
+  const syncable = list.filter((item) => SERVICE_META[item.service]?.syncSupported !== false);
+  const realRemaining = syncable.reduce((sum, item) => sum + Number(item.real_quota?.total_remaining || 0), 0);
+  const syncedKeys = syncable.reduce((sum, item) => sum + Number(item.real_quota?.synced_keys || 0), 0);
+  const syncableLabels = syncable.map((item) => item.label).filter(Boolean).join(' / ') || '暂无';
   const socialStats = social?.stats || {};
   const socialMode = socialModeLabel(social?.mode || 'manual');
 
@@ -3175,7 +3466,7 @@ function renderGlobalSummary(services, social) {
     <div class="summary-box">
       <div class="label">代理 Token 总数</div>
       <div class="value">${fmtNum(totalTokens)}</div>
-      <div class="hint">共 ${fmtNum(totalKeys)} 个已导入 Key，Tavily 和 Firecrawl 分别签发，不会混用</div>
+      <div class="hint">共 ${fmtNum(totalKeys)} 个已导入 Key，Tavily / Exa / Firecrawl 分别签发，不会混用</div>
     </div>
     <div class="summary-box">
       <div class="label">今日代理调用</div>
@@ -3185,7 +3476,7 @@ function renderGlobalSummary(services, social) {
     <div class="summary-box">
       <div class="label">真实剩余额度</div>
       <div class="value">${fmtNum(realRemaining)}</div>
-      <div class="hint">已同步 ${fmtNum(syncedKeys)} 个 Key，来自两个池子的真实额度汇总</div>
+      <div class="hint">已同步 ${fmtNum(syncedKeys)} 个 Key，当前只汇总支持官方同步的服务：${escapeHtml(syncableLabels)}</div>
     </div>
     <div class="summary-box">
       <div class="label">Social / X Token</div>
@@ -3201,6 +3492,16 @@ function renderGlobalSummary(services, social) {
 }
 
 function renderSyncMeta(service, payload) {
+  if (service === 'exa') {
+    const detail = payload.usage_sync?.detail || 'Exa 当前未接入官方额度同步';
+    document.getElementById(`sync-meta-${service}`).textContent = [
+      `已导入 ${fmtNum(payload.keys_total || 0)} 个 Key`,
+      `已签发 ${fmtNum((payload.tokens || []).length)} 个 Token`,
+      detail,
+    ].join(' · ');
+    return;
+  }
+
   const quota = payload.real_quota || {};
   const usageSync = payload.usage_sync || {};
   const parts = [];
@@ -3228,6 +3529,47 @@ function renderSyncMeta(service, payload) {
 function renderOverview(service, payload) {
   const overview = payload.overview || {};
   const quota = payload.real_quota || {};
+
+  if (service === 'exa') {
+    const todayCount = Number(overview.today_count || 0);
+    const todaySuccess = Number(overview.today_success || 0);
+    const successRate = todayCount ? `${Math.round((todaySuccess / todayCount) * 100)}%` : '暂无';
+
+    document.getElementById(`overview-${service}`).innerHTML = `
+      <div class="stat-box">
+        <div class="label">官方额度同步</div>
+        <div class="value">未接入</div>
+        <div class="hint">Exa 当前先展示独立代理调用统计</div>
+      </div>
+      <div class="stat-box">
+        <div class="label">Key 池状态</div>
+        <div class="value">${fmtNum(payload.keys_active || 0)} <span class="muted">/ ${fmtNum(payload.keys_total || 0)}</span></div>
+        <div class="hint">活跃 / 总数</div>
+      </div>
+      <div class="stat-box">
+        <div class="label">Token 池状态</div>
+        <div class="value">${fmtNum((payload.tokens || []).length)}</div>
+        <div class="hint">Exa 独立代理 Token 池</div>
+      </div>
+      <div class="stat-box">
+        <div class="label">今日代理调用</div>
+        <div class="value">${fmtNum(overview.today_count || 0)}</div>
+        <div class="hint">成功 ${fmtNum(overview.today_success || 0)} / 失败 ${fmtNum(overview.today_failed || 0)}</div>
+      </div>
+      <div class="stat-box">
+        <div class="label">本月代理调用</div>
+        <div class="value">${fmtNum(overview.month_count || 0)}</div>
+        <div class="hint">本月成功 ${fmtNum(overview.month_success || 0)}</div>
+      </div>
+      <div class="stat-box">
+        <div class="label">今日成功率</div>
+        <div class="value">${successRate}</div>
+        <div class="hint">${payload.usage_sync?.detail || '后续如果接入官方额度同步，会在这里继续补充展示。'}</div>
+      </div>
+    `;
+    return;
+  }
+
   const totalLimit = Number(quota.total_limit || 0);
   const totalUsed = Number(quota.total_used || 0);
   const totalRemaining = Number(quota.total_remaining || 0);
@@ -3368,6 +3710,14 @@ function renderTokens(service, tokens) {
 }
 
 function renderKeyQuota(service, key) {
+  if (service === 'exa') {
+    return `
+      <div class="table-note muted">Exa 当前只展示代理层调用统计。</div>
+      <div class="table-note muted">官方 Key 额度同步待接入。</div>
+      ${key.usage_sync_error ? `<div class="table-note" style="color: var(--warn); margin-top: 6px">最近错误: ${escapeHtml(key.usage_sync_error)}</div>` : ''}
+    `;
+  }
+
   if (key.usage_key_limit !== null && key.usage_key_used !== null) {
     const remain = key.usage_key_remaining ?? Math.max(0, key.usage_key_limit - key.usage_key_used);
     return `
@@ -3395,6 +3745,10 @@ function renderKeyQuota(service, key) {
 }
 
 function renderAccountQuota(service, key) {
+  if (service === 'exa') {
+    return '<span class="muted">官方账户额度未接入</span>';
+  }
+
   if (key.usage_account_limit !== null && key.usage_account_used !== null) {
     const remain = key.usage_account_remaining ?? Math.max(0, key.usage_account_limit - key.usage_account_used);
     const plan = key.usage_account_plan || (service === 'firecrawl' ? 'Firecrawl Credits' : '未知计划');
@@ -3468,8 +3822,11 @@ async function refresh() {
     renderApiExample(service, servicePayload.tokens || []);
     renderTokens(service, servicePayload.tokens || []);
     renderKeys(service, servicePayload.keys || []);
-    document.getElementById(`sync-btn-${service}`).textContent = meta.syncButton;
-    document.getElementById(`sync-btn-${service}`).disabled = false;
+    const syncButton = document.getElementById(`sync-btn-${service}`);
+    const syncSupported = servicePayload.usage_sync?.supported !== false && meta.syncSupported !== false;
+    syncButton.textContent = syncSupported ? meta.syncButton : '暂不支持同步';
+    syncButton.disabled = !syncSupported;
+    syncButton.title = syncSupported ? '' : (servicePayload.usage_sync?.detail || meta.quotaSource);
   }
   applyActiveService();
 }
@@ -3526,6 +3883,10 @@ async function toggleKey(id, active) {
 }
 
 async function syncUsage(service, force) {
+  if (SERVICE_META[service]?.syncSupported === false) {
+    alert(SERVICE_META[service].quotaSource);
+    return;
+  }
   const button = document.getElementById(`sync-btn-${service}`);
   const originalText = button.textContent;
   button.disabled = true;
