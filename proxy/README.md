@@ -1,71 +1,202 @@
-# Multi-Service API Proxy
+# MySearch Proxy Console
 
-把多个 **Tavily** 和 **Firecrawl** API Key 做成统一代理池，对外暴露固定入口、独立 Token，并提供一个更适合日常维护的可视化控制台。
+[English Guide](./README_EN.md) · [返回仓库](../README.md)
 
-当前这版 `proxy/` 已支持：
+`proxy/` 是 `MySearch Proxy` 里的控制台与代理层。
 
-- Tavily / Firecrawl **分服务隔离**
-- 可选 `POST /social/search`，把 `grok2api` / xAI-compatible `/responses` 包成结构化 X 搜索
-- 可直接用 grok2api 后台 `app_key` 自动继承 `app.api_key` 与 token 池，不必再手填第二遍 social token
-- 独立 Key 池、独立 Token 池
-- 顶部卡片切换 + 单服务详情面板
-- Tavily 真实额度同步：`GET /usage`
-- Firecrawl 真实额度同步：
-  - `GET /v2/team/credit-usage`
-  - `GET /v2/team/credit-usage/historical?byApiKey=true`
-- 本地代理调用统计、成功率、延迟统计
+它不是单纯的 key 面板，而是把 Tavily、Firecrawl、Social / X 三条能力线
+收进一个统一工作台里，让你同时管理：
 
-## 仓库定位
+- 上游 provider key
+- 下游调用 token
+- 官方额度同步
+- compatible gateway 接线
+- MySearch 最终应该怎么接这套搜索基础设施
 
-这个 `proxy/` 是 `MySearch Proxy` 仓库里的控制台与代理层。
+![MySearch Console Hero](../docs/images/mysearch-console-hero.jpg)
 
-如果你准备公开发布，建议以你自己的镜像名重新构建，而不是继续沿用旧镜像名。
+## 这个控制台解决什么问题
 
-## 功能概览
+很多代理面板只做其中一小段：
 
-- Tavily 独立代理入口：
-  - `POST /api/search`
-  - `POST /api/extract`
-- Firecrawl 独立代理入口：
-  - `/firecrawl/*`
-  - 示例：`POST /firecrawl/v2/scrape`
-- Social / X 入口：
-  - `POST /social/search`
-  - `GET /social/health`
-- 独立代理 Token：
-  - Tavily Token 前缀：`tvly-`
-  - Firecrawl Token 前缀：`fctk-`
-- 控制台支持：
-  - 按服务导入 Key
-  - 按服务创建 Token
-  - 按服务同步真实额度
-  - 按服务查看 Key 池与用量
-  - 顶部一键切换 Tavily / Firecrawl 工作台
+- 只存 key，不管下游怎么发 token
+- 只做 token，不同步官方额度
+- 只支持 Tavily，不支持 Firecrawl
+- 只支持官方接口，不支持自己的 compatible social gateway
+- 只适合人工维护，不适合真正给 MCP / Skill 当后端
 
-## 和注册器如何联动
+`MySearch Proxy Console` 把这些拆散的问题重新收口：
 
-注册器上传到 proxy 时，会直接调用：
+- Tavily 独立工作台
+- Firecrawl 独立工作台
+- Social / X 独立工作台
+- 同一个页面里看清 Key 池、Token 池、真实额度、代理统计和接线方式
 
-```json
-{
-  "key": "fc-xxxx",
-  "email": "fc-xxx@example.com",
-  "service": "firecrawl"
-}
+## 为什么它比普通 key 面板更好用
+
+### 1. 按服务拆开，而不是混成一个池子
+
+这里不是一个“所有 key 全堆在一起”的控制台。
+
+它明确把三类能力拆开：
+
+- Tavily
+- Firecrawl
+- Social / X
+
+这样做的好处是：
+
+- provider 额度不会混算
+- token 不会串用
+- 统计更清楚
+- 下游调用地址也更直观
+
+### 2. 它服务于真正的 MySearch 运行时
+
+这个控制台不是孤立产品。
+
+它的设计目标就是给：
+
+- `mysearch/` MCP
+- `skill/` Codex / Claude Code skill
+- `openclaw/` OpenClaw skill
+
+提供后端与配置落点。
+
+### 3. 它能把 `grok2api` 收进同一控制平面
+
+如果你的 X / Social 侧来自 `grok2api`：
+
+- 可以直接接 `/v1/admin/config`
+- 可以接 `/v1/admin/tokens`
+- 可以自动继承 `app.api_key`
+- 可以把 token 状态也统一展示在自己的工作台里
+
+这点比“再手写一个 social 脚本”整齐很多。
+
+### 4. 没有 X 时，它也不是废的
+
+即使你暂时没有 `grok2api` 或官方 `xAI`：
+
+- Tavily 工作台仍可用
+- Firecrawl 工作台仍可用
+- MySearch 仍可作为 `web + docs + extract` 的统一入口
+
+也就是说，Social / X 是增强项，不是控制台存在的唯一价值。
+
+## 默认推荐怎么接
+
+最推荐的完整链路是：
+
+```text
+tavily-key-generator
+  -> 提供 Tavily / Firecrawl provider 或聚合 API
+
+MySearch Proxy Console
+  -> 管理 key、token、额度、/social/search、grok2api 接线
+
+MySearch MCP / Skill / OpenClaw Skill
+  -> 作为最终给 AI 用的统一搜索入口
 ```
 
-也就是说：
+推荐项目：
 
-- Tavily 注册结果上传时会写入 Tavily 池
-- Firecrawl 注册结果上传时会写入 Firecrawl 池
-- 服务器不需要再靠 key 前缀猜测服务
+- [skernelx/tavily-key-generator](https://github.com/skernelx/tavily-key-generator)
 
-这条链路已经做过真实验证：Firecrawl 上传后会被 `/api/keys`
-识别成 `service=firecrawl`，不会落到 Tavily 池里。
+默认推荐原因：
 
-## 推荐部署方式
+- Tavily / Firecrawl 更适合先收口在 provider 层
+- MySearch Proxy 再负责把它们组织成真正给 AI 使用的统一工作流
 
-### 1. 直接使用 Docker Hub 镜像
+## 界面预览
+
+当前工作台展开区：
+
+![MySearch Console Workspaces](../docs/images/mysearch-console-workspaces.jpg)
+
+## 支持的能力
+
+### Tavily
+
+代理入口：
+
+- `POST /api/search`
+- `POST /api/extract`
+
+控制台能力：
+
+- Key 池
+- Token 池
+- Tavily `/usage` 额度同步
+- 代理调用统计
+
+### Firecrawl
+
+代理入口：
+
+- `/firecrawl/*`
+- 例如 `POST /firecrawl/v2/scrape`
+
+控制台能力：
+
+- Key 池
+- Token 池
+- Firecrawl credits 同步
+- 代理调用统计
+
+### Social / X
+
+代理入口：
+
+- `POST /social/search`
+- `GET /social/health`
+
+控制台能力：
+
+- upstream base URL 管理
+- gateway token 管理
+- grok2api admin 读取
+- token 状态与额度展示
+
+## 没有某一项支持时会怎样
+
+### 没有 `grok2api` 或官方 `xAI`
+
+控制台仍然可用。
+
+你仍然可以正常管理：
+
+- Tavily
+- Firecrawl
+- MySearch 对应的 web / docs / extract 路由
+
+只有 Social / X 工作台会变成未配置状态。
+
+### 没有 Tavily
+
+控制台仍然可以正常承担：
+
+- Firecrawl
+- Social / X
+
+但 MySearch 里的普通 `web / news` 路由会明显变弱。
+
+### 没有 Firecrawl
+
+控制台仍然可以正常承担：
+
+- Tavily
+- Social / X
+
+但 MySearch 里的 `docs / github / pdf / extract` 体验会下降。
+
+如果缺的是官方 Tavily / Firecrawl key，默认推荐先接：
+
+- [skernelx/tavily-key-generator](https://github.com/skernelx/tavily-key-generator)
+
+## 部署
+
+### 1. Docker Hub 或自建镜像
 
 ```bash
 mkdir -p mysearch-proxy-data
@@ -79,24 +210,18 @@ docker run -d \
   your-registry/mysearch-proxy:latest
 ```
 
-启动后访问：
+访问：
 
 ```text
 http://localhost:9874
 ```
 
-### 2. 使用 docker compose
+### 2. docker compose
 
 ```bash
 cd proxy
 docker compose up -d
 ```
-
-默认 compose 会：
-
-- 暴露端口 `9874`
-- 将数据库挂载到 `./data`
-- 使用 `ADMIN_PASSWORD` 作为控制台密码
 
 ### 3. 本地源码运行
 
@@ -108,7 +233,7 @@ ADMIN_PASSWORD=your-admin-password uvicorn server:app --host 0.0.0.0 --port 9874
 
 ## 更新方式
 
-如果你已经在服务器上跑了旧版本，推荐直接拉新镜像后重启容器：
+如果你已经有一个旧容器，保留数据卷即可直接替换镜像：
 
 ```bash
 docker pull your-registry/mysearch-proxy:latest
@@ -124,52 +249,70 @@ docker run -d \
   your-registry/mysearch-proxy:latest
 ```
 
-只要保留原来的数据卷目录，Key、Token 和控制台密码都会继续保留。旧库会自动迁移出 `service` 字段，历史 Tavily 数据会被标记为 `tavily`。
+只要保留 `/app/data` 对应的数据卷，已有：
 
-## 控制台里能看到什么
+- key
+- token
+- 控制台密码
+- 历史统计
 
-控制台现在不是上下两个长栏目硬堆，而是：
+都会继续保留。
 
-- 顶部服务卡片切换区
-- 首屏当前工作台概览
-- 下方当前服务的完整详情面板
+## 配置项
 
-每个服务面板里都能看到：
+最基础的控制台配置：
 
-### 1. Tavily 栏目
+```env
+ADMIN_PASSWORD=change-me
+SOCIAL_GATEWAY_UPSTREAM_BASE_URL=https://api.x.ai/v1
+SOCIAL_GATEWAY_UPSTREAM_RESPONSES_PATH=/responses
+SOCIAL_GATEWAY_ADMIN_BASE_URL=https://media.example.com
+SOCIAL_GATEWAY_ADMIN_APP_KEY=
+SOCIAL_GATEWAY_ADMIN_VERIFY_PATH=/v1/admin/verify
+SOCIAL_GATEWAY_ADMIN_CONFIG_PATH=/v1/admin/config
+SOCIAL_GATEWAY_ADMIN_TOKENS_PATH=/v1/admin/tokens
+SOCIAL_GATEWAY_CACHE_TTL_SECONDS=60
+SOCIAL_GATEWAY_UPSTREAM_API_KEY=
+SOCIAL_GATEWAY_MODEL=grok-4.1-fast
+SOCIAL_GATEWAY_TOKEN=
+```
 
-- Key 池
-- Token 池
-- 真实额度汇总
-- Tavily `/usage` 同步状态
-- 代理侧成功 / 失败 / 月度统计
+### 推荐的 `grok2api` 接法
 
-### 2. Firecrawl 栏目
+如果上游是 `grok2api`，优先只填：
 
-- Key 池
-- Token 池
-- Firecrawl credits 汇总
-- Firecrawl credits 同步状态
-- 代理侧成功 / 失败 / 月度统计
+```env
+SOCIAL_GATEWAY_UPSTREAM_BASE_URL=https://media.example.com/v1
+SOCIAL_GATEWAY_ADMIN_BASE_URL=https://media.example.com
+SOCIAL_GATEWAY_ADMIN_APP_KEY=YOUR_GROK2API_APP_KEY
+SOCIAL_GATEWAY_MODEL=grok-4.1-fast
+```
 
-## 使用流程
+这样控制台会自动：
 
-1. 启动 proxy
-2. 打开控制台并登录
-3. 在 Tavily 或 Firecrawl 栏目导入对应 Key
-4. 在对应栏目创建 Token
-5. 把该 Token 发给你的下游程序
-6. 用对应的代理端点发起请求
-7. 在控制台查看该服务的真实额度和代理统计
+- 从 `/v1/admin/config` 继承 `app.api_key`
+- 从 `/v1/admin/tokens` 读取 token 状态与额度
+- 在没显式填 `SOCIAL_GATEWAY_UPSTREAM_API_KEY` /
+  `SOCIAL_GATEWAY_TOKEN` 时直接复用继承结果
 
-## API 调用方式
+### 手动模式
 
-认证方式支持两种：
+如果你不想接 admin API，也可以手动填：
+
+```env
+SOCIAL_GATEWAY_UPSTREAM_BASE_URL=https://media.example.com/v1
+SOCIAL_GATEWAY_UPSTREAM_API_KEY=YOUR_UPSTREAM_KEY
+SOCIAL_GATEWAY_TOKEN=YOUR_SOCIAL_GATEWAY_TOKEN
+```
+
+## API 调用示例
+
+认证方式支持：
 
 - `Authorization: Bearer YOUR_TOKEN`
-- body 里传 `api_key`
+- body 里的 `api_key`
 
-### Tavily 示例
+### Tavily
 
 ```bash
 curl -X POST http://localhost:9874/api/search \
@@ -185,7 +328,7 @@ curl -X POST http://localhost:9874/api/extract \
   -d '{"urls": ["https://example.com"]}'
 ```
 
-### Firecrawl 示例
+### Firecrawl
 
 ```bash
 curl -X POST http://localhost:9874/firecrawl/v2/scrape \
@@ -194,36 +337,7 @@ curl -X POST http://localhost:9874/firecrawl/v2/scrape \
   -d '{"url": "https://example.com", "formats": ["markdown"]}'
 ```
 
-```bash
-curl -X GET http://localhost:9874/firecrawl/v2/team/credit-usage \
-  -H "Authorization: Bearer YOUR_FIRECRAWL_TOKEN"
-```
-
-### Social / X 示例
-
-这个入口不走当前控制台里的 Tavily / Firecrawl Key 池。
-
-推荐模式是直接对接 grok2api 后台：
-
-```env
-SOCIAL_GATEWAY_UPSTREAM_BASE_URL=https://media.example.com/v1
-SOCIAL_GATEWAY_ADMIN_BASE_URL=https://media.example.com
-SOCIAL_GATEWAY_ADMIN_APP_KEY=YOUR_GROK2API_APP_KEY
-```
-
-这样 proxy 会自动：
-
-- 从 `/v1/admin/config` 读取 `app.api_key`
-- 从 `/v1/admin/tokens` 聚合 token 状态和额度面板
-- 在没显式配置 `SOCIAL_GATEWAY_UPSTREAM_API_KEY` / `SOCIAL_GATEWAY_TOKEN` 时，直接复用上游 `app.api_key`
-
-如果你不想接后台 API，也可以继续手动模式：
-
-```env
-SOCIAL_GATEWAY_UPSTREAM_BASE_URL=https://media.example.com/v1
-SOCIAL_GATEWAY_UPSTREAM_API_KEY=YOUR_UPSTREAM_KEY
-SOCIAL_GATEWAY_TOKEN=YOUR_SOCIAL_GATEWAY_TOKEN
-```
+### Social / X
 
 ```bash
 curl -X POST http://localhost:9874/social/search \
@@ -242,93 +356,41 @@ curl -X POST http://localhost:9874/social/search \
 curl http://localhost:9874/social/health
 ```
 
-## 管理 API
+## 快速验收
 
-所有管理 API 需要：
+### 控制台
 
-- `X-Admin-Password: your-admin-password`
-
-或者：
-
-- `Authorization: Bearer your-admin-password`
-
-### 常用管理端点
-
-- `GET /api/stats`
-  返回 Tavily / Firecrawl 双服务概览，以及 Social / X 集成状态
-
-- `GET /api/keys?service=tavily`
-- `GET /api/keys?service=firecrawl`
-  返回指定服务的 Key 列表
-
-- `POST /api/keys`
-  body 里传 `service`
-
-- `PUT /api/keys/{id}/toggle`
-  启用 / 禁用某个 Key
-
-- `DELETE /api/keys/{id}`
-  删除 Key
-
-- `GET /api/tokens?service=tavily`
-- `GET /api/tokens?service=firecrawl`
-  返回指定服务的 Token 列表
-
-- `POST /api/tokens`
-  body 里传 `service`
-
-- `DELETE /api/tokens/{id}`
-  删除 Token
-
-- `POST /api/usage/sync`
-  body 里传 `service`
-
-- `PUT /api/password`
-  修改控制台密码
-
-## 配置项
-
-- `SOCIAL_GATEWAY_UPSTREAM_BASE_URL`
-  - `grok2api` / xAI-compatible 上游根地址
-- `SOCIAL_GATEWAY_UPSTREAM_RESPONSES_PATH`
-  - 默认 `/responses`
-- `SOCIAL_GATEWAY_UPSTREAM_API_KEY`
-  - 上游调用 key
-- `SOCIAL_GATEWAY_MODEL`
-  - 默认 `grok-4.1-fast`
-- `SOCIAL_GATEWAY_TOKEN`
-  - 下游访问 `/social/search` 的 token
-  - 不填时会回退到 `SOCIAL_GATEWAY_UPSTREAM_API_KEY`
-
-| 环境变量 | 默认值 | 说明 |
-|----------|--------|------|
-| `ADMIN_PASSWORD` | `admin` | 控制台登录密码 |
-| `USAGE_SYNC_TTL_SECONDS` | `300` | 真实额度缓存秒数 |
-| `USAGE_SYNC_CONCURRENCY` | `4` | 并发同步额度的最大 Key 数 |
-
-## 数据持久化
-
-SQLite 数据库默认保存在：
+打开：
 
 ```text
-/app/data/proxy.db
+http://localhost:9874
 ```
 
-所以容器部署时一定要挂载数据卷，例如：
+确认下面几项是否正常：
+
+- 能登录
+- 顶部工作台切换正常
+- 当前服务的 key / token 能创建和展示
+- Tavily / Firecrawl 额度同步正常
+- Social / X 工作台能读到 upstream 状态
+
+### 管理 API
 
 ```bash
--v /your/data/path:/app/data
+curl http://localhost:9874/api/stats \
+  -H "X-Admin-Password: your-admin-password"
 ```
 
-## 适合什么场景
+```bash
+curl "http://localhost:9874/api/keys?service=tavily" \
+  -H "X-Admin-Password: your-admin-password"
+```
 
-- 你有多组 Tavily / Firecrawl Key，想统一出口
-- 你不想把真实 API Key 直接发给下游程序
-- 你希望 Tavily 和 Firecrawl 各自独立统计、独立授权
-- 你想让注册器自动把新拿到的 Key 上传进对应池子
+## 相关文档
 
-## 注意事项
-
-- Tavily 真实额度依赖官方 `/usage`
-- Firecrawl 当前主要返回账户级 credits 视图，控制台会优先展示账户额度
-- 旧数据库会自动迁移 `service` 字段，但旧数据默认视为 Tavily
+- 仓库总览：
+  [../README.md](../README.md)
+- MySearch MCP：
+  [../mysearch/README.md](../mysearch/README.md)
+- 架构说明：
+  [../docs/mysearch-architecture.md](../docs/mysearch-architecture.md)

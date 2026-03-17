@@ -1,140 +1,284 @@
 # MySearch
 
-[中文说明](./README.md)
+[中文说明](./README.md) · [Back to repo](../README_EN.md)
 
-`MySearch` is a standalone search aggregation MCP.
+`MySearch` is the installable search MCP inside this repository.
 
-Its product boundary is:
+It is not a thin wrapper around one provider. It turns `Tavily`,
+`Firecrawl`, and optional `X / Social` into one search runtime and combines
+search, extraction, and lightweight research in the same toolset.
 
-- installable into `Codex` and `Claude Code`
-- a unified search entry for `Tavily + Firecrawl + X`
-- official-API-first, while still supporting compatible custom gateways
+## What this MCP is for
 
-`mysearch/` is the MCP implementation inside the `MySearch Proxy` repository.
+`mysearch/` is responsible for:
 
-## Capabilities
+- a unified `search` entry
+- single-page extraction via `extract_url`
+- lightweight research flows via `research`
+- provider and config checks via `mysearch_health`
 
-- Tavily for general web discovery, news, and quick answers
-- Firecrawl for docs, GitHub, changelogs, pricing pages, PDFs, and extraction
-- xAI Responses API for X / Twitter search and social sentiment
-  - this is optional, not a startup requirement for MySearch
+It is a good fit for:
 
-## MCP Tools
+- `Codex`
+- `Claude Code`
+- other local assistants that support MCP
 
-- `search`
-- `extract_url`
+If you only need a stronger search MCP, this directory is enough.
+
+If you also need pooled keys, downstream tokens, quota sync, and a social
+gateway UI, see [../proxy/README_EN.md](../proxy/README_EN.md).
+
+## Why it is more complete than typical search MCPs
+
+### 1. It is not single-source
+
+Default routing:
+
+- general web, news, discovery -> Tavily
+- docs, GitHub, PDFs, pricing, changelogs -> Firecrawl
+- X / Social -> xAI or compatible `/social/search`
+
+### 2. It extracts content instead of only searching
+
+- `extract_url` prefers Firecrawl
+- if Firecrawl fails or returns empty content, it falls back to Tavily extract
+
+So content extraction is a first-class feature, not an afterthought.
+
+### 3. It is a real MCP runtime, not just a prompt
+
+You install an MCP with tools and routing, instead of stuffing search behavior
+into a long prompt.
+
+### 4. It is not locked to official APIs
+
+You can:
+
+- connect to official providers directly
+- route Tavily / Firecrawl through your own gateway
+- route X / Social through compatible `/social/search`
+- fine-tune auth with `BASE_URL + PATH + AUTH_*`
+
+### 5. X / Social is optional
+
+Without `xAI` or `grok2api`, these still work:
+
+- `web`
+- `news`
+- `docs`
+- `github`
+- `pdf`
+- `extract`
 - `research`
-- `mysearch_health`
 
-`extract_url` prefers `Firecrawl` first, and automatically falls back to
-`Tavily extract` when Firecrawl fails or returns empty content.
+Only explicit social routes become unavailable.
 
-## X / Social is optional
+## Recommended upstream
 
-MySearch does not require `grok2api`, a compatible gateway, or an official
-`xAI` key to be usable.
+The default recommendation is not to spread official keys across every client.
+The recommended shape is:
 
-- With only `Tavily + Firecrawl` configured:
-  - `search(mode="web")` works
-  - `search(mode="docs")` works
-  - `extract_url(...)` works
-  - `research(...)` works
-- Without `xAI` configured:
-  - `search(mode="social")` returns a clear setup hint
-  - `research(include_social=true)` still returns web results and adds `social_error`
+```text
+tavily-key-generator
+  -> provides Tavily / Firecrawl official provider access or aggregation APIs
 
-Treat X / Social as an optional third provider, not as the installation gate.
+MySearch MCP
+  -> only handles routing, tool exposure, and output shaping
+```
 
-## Default Routing
+Recommended project:
 
-- General web search -> Tavily
-- News / latest updates -> Tavily news
-- Docs / GitHub / PDF / changelog / pricing -> Firecrawl
-- X / Twitter / social sentiment -> xAI X search
-- Web + X together -> hybrid aggregation
+- [skernelx/tavily-key-generator](https://github.com/skernelx/tavily-key-generator)
+
+Why this is the preferred setup:
+
+- MySearch does not need to manage Tavily / Firecrawl upstream operations
+- you can point clients at one normalized gateway instead of copying official
+  keys around
+
+If you already have official keys, direct official mode still works.
+
+## Tool list
+
+### `search`
+
+Unified search entry.
+
+Common modes:
+
+- `auto`
+- `web`
+- `news`
+- `social`
+- `docs`
+- `github`
+- `pdf`
+- `research`
+
+### `extract_url`
+
+Single-page content extraction.
+
+Default behavior:
+
+- Firecrawl first
+- Tavily extract fallback when Firecrawl fails or returns empty content
+
+### `research`
+
+Lightweight research workflow.
+
+Useful for:
+
+- comparisons
+- trends
+- questions that need search plus extraction plus evidence packaging
+
+### `mysearch_health`
+
+Returns provider state, base URLs, key availability, and config summary.
 
 ## Intent and Strategy
 
-- `intent`: `factual`, `status`, `comparison`, `tutorial`, `exploratory`,
-  `news`, `resource`
-- `strategy`: `fast`, `balanced`, `verify`, `deep`
+`MySearch` separates "what are you looking for" from "how hard should it
+search":
 
-Defaults:
+- `intent`
+  - `factual`
+  - `status`
+  - `comparison`
+  - `tutorial`
+  - `exploratory`
+  - `news`
+  - `resource`
+- `strategy`
+  - `fast`
+  - `balanced`
+  - `verify`
+  - `deep`
 
-- `comparison` / `exploratory` -> prefers `verify`
-- `docs` / `resource` / `tutorial` / `include_content=true` -> prefers `balanced`
-- `research` -> prefers `deep`
+Default tendencies:
+
+- `comparison` / `exploratory` lean toward `verify`
+- `docs` / `resource` / `tutorial` lean toward `balanced`
+- `research` leans toward `deep`
+
+## Provider coverage and degraded behavior
+
+### Tavily
+
+Handles:
+
+- general web
+- news
+- default research discovery
+
+If Tavily is unavailable:
+
+- `web / news / default research`
+
+become weaker, but Firecrawl can still cover docs and some extraction work.
+
+### Firecrawl
+
+Handles:
+
+- docs
+- GitHub
+- PDFs
+- pricing
+- changelogs
+- content extraction
+
+If Firecrawl is unavailable:
+
+- docs-focused retrieval gets worse
+- `extract_url` falls back to Tavily extract where possible
+
+### X / Social
+
+Handles:
+
+- X / Social search
+- sentiment and conversations
+
+If X / Social is unavailable:
+
+- `search(mode="social")` returns a clear setup hint
+- `research(include_social=true)` still returns web evidence and adds
+  `social_error`
 
 ## Installation
 
-Prepare environment variables first:
+Run these commands from the repository root:
 
 ```bash
+python3 -m venv venv
 cp mysearch/.env.example mysearch/.env
+./install.sh
 ```
 
-Minimal config:
+Minimal usable config:
 
 ```env
 MYSEARCH_TAVILY_API_KEY=tvly-...
 MYSEARCH_FIRECRAWL_API_KEY=fc-...
 ```
 
-If you also want X / Social, add:
+The more reusable public deployment pattern is to point MySearch at
+[skernelx/tavily-key-generator](https://github.com/skernelx/tavily-key-generator)
+instead:
 
 ```env
-MYSEARCH_XAI_API_KEY=xai-...
+MYSEARCH_TAVILY_BASE_URL=https://your-search-gateway.example.com
+MYSEARCH_TAVILY_SEARCH_PATH=/api/search
+MYSEARCH_TAVILY_EXTRACT_PATH=/api/extract
+MYSEARCH_TAVILY_AUTH_MODE=bearer
+MYSEARCH_TAVILY_API_KEY=your-token
+
+MYSEARCH_FIRECRAWL_BASE_URL=https://your-search-gateway.example.com
+MYSEARCH_FIRECRAWL_SEARCH_PATH=/firecrawl/v2/search
+MYSEARCH_FIRECRAWL_SCRAPE_PATH=/firecrawl/v2/scrape
+MYSEARCH_FIRECRAWL_AUTH_MODE=bearer
+MYSEARCH_FIRECRAWL_API_KEY=your-token
 ```
 
-Install:
+The root `install.sh` will:
 
-```bash
-./install.sh
-```
+1. install dependencies
+2. detect `Claude Code`
+3. detect `Codex`
+4. register the `mysearch` MCP
+5. inject `MYSEARCH_*` values from `mysearch/.env`
 
-The installer will:
+## X / Social configuration
 
-1. install `mysearch/requirements.txt`
-2. register `mysearch` in Claude Code if `claude` is available
-3. register `mysearch` in Codex if `codex` is available
-4. forward existing `MYSEARCH_*` environment variables into the MCP entry
-
-`install.sh` will load `mysearch/.env` first when it exists.
-
-Verify:
-
-```bash
-claude mcp list
-codex mcp list
-```
-
-## If you want X / Social
-
-Official mode:
+### Official xAI mode
 
 ```env
 MYSEARCH_XAI_BASE_URL=https://api.x.ai/v1
 MYSEARCH_XAI_RESPONSES_PATH=/responses
 MYSEARCH_XAI_SEARCH_MODE=official
+MYSEARCH_XAI_API_KEY=xai-...
 ```
 
-Compatible mode:
+### Compatible mode
 
 ```env
 MYSEARCH_XAI_BASE_URL=https://media.example.com/v1
 MYSEARCH_XAI_SOCIAL_BASE_URL=https://your-social-gateway.example.com
 MYSEARCH_XAI_SEARCH_MODE=compatible
-MYSEARCH_XAI_API_KEY=your-gateway-token
+MYSEARCH_XAI_API_KEY=your-social-gateway-token
 ```
 
-In this mode:
+Behavior:
 
-- `MYSEARCH_XAI_BASE_URL` points to the model / `/responses` gateway
+- `MYSEARCH_XAI_BASE_URL` points to the model or `/responses` gateway
 - `MYSEARCH_XAI_SOCIAL_BASE_URL` points to the social gateway root
-- `MySearch` appends `/social/search` by default
+- MySearch appends `/social/search` automatically
 
 If you do not have `grok2api` or an official `xAI` key yet, you can leave the
-entire X section unset and still use MySearch as a Tavily + Firecrawl MCP.
+entire X section unset and still use MySearch as a `Tavily + Firecrawl` MCP.
 
 ## Integrated social gateway
 
@@ -142,7 +286,7 @@ Reference implementation:
 
 - module: `mysearch.social_gateway`
 - purpose: normalize xAI-compatible `/responses` output into a stable social
-  search result shape
+  search schema
 
 Minimal config:
 
@@ -166,7 +310,43 @@ or:
 uvicorn mysearch.social_gateway:app --host 127.0.0.1 --port 9875
 ```
 
-## Common Usage
+## Quick verification
+
+Check MCP registration:
+
+```bash
+claude mcp list
+codex mcp list
+codex mcp get mysearch
+```
+
+Health check:
+
+```bash
+python skill/scripts/check_mysearch.py --health-only
+```
+
+Web and docs smoke tests:
+
+```bash
+python skill/scripts/check_mysearch.py --web-query "OpenAI latest announcements"
+python skill/scripts/check_mysearch.py --docs-query "OpenAI Responses API docs"
+```
+
+If X / Social is configured:
+
+```bash
+python skill/scripts/check_mysearch.py --social-query "Model Context Protocol"
+```
+
+Extraction smoke test:
+
+```bash
+python skill/scripts/check_mysearch.py \
+  --extract-url "https://www.anthropic.com/news/model-context-protocol"
+```
+
+## Example calls
 
 General web search:
 
@@ -180,7 +360,7 @@ General web search:
 }
 ```
 
-X sentiment:
+X / Social:
 
 ```json
 {
@@ -193,7 +373,7 @@ X sentiment:
 }
 ```
 
-Comparison query:
+Comparison-style query:
 
 ```json
 {
@@ -207,7 +387,7 @@ Comparison query:
 }
 ```
 
-Extract content:
+Extract page content:
 
 ```json
 {
@@ -233,5 +413,11 @@ Research flow:
 }
 ```
 
-More architecture notes:
-[../docs/mysearch-architecture.md](../docs/mysearch-architecture.md).
+## Related docs
+
+- Repository overview:
+  [../README_EN.md](../README_EN.md)
+- Proxy console:
+  [../proxy/README_EN.md](../proxy/README_EN.md)
+- Architecture:
+  [../docs/mysearch-architecture.md](../docs/mysearch-architecture.md)
