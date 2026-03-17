@@ -13,6 +13,9 @@
   - Key 池、Token 池、额度同步、`/social/search`
 - `skill/`
   - 可直接给智能体安装的 MySearch Skill
+- `openclaw/`
+  - 可上传到 OpenClaw Hub 的独立搜索 skill
+  - 自带 OpenClaw bootstrap 脚本和运行时安装脚本
 
 ## 界面预览
 
@@ -148,6 +151,35 @@ MYSEARCH_XAI_API_KEY=your-gateway-token
 - `research(...)` 仍会返回网页部分，只是在结果里给出 `social_error`
 - 只有 `search(mode="social")` 会提示你补充 `xAI` / social gateway 配置
 
+### 1.5 安装到 OpenClaw
+
+如果你要把 `MySearch` 作为 OpenClaw 的默认搜索 skill，使用仓库里的
+`openclaw/`：
+
+```bash
+cp openclaw/.env.example openclaw/.env
+# 编辑 openclaw/.env
+
+bash openclaw/scripts/install_openclaw_skill.sh \
+  --install-to ~/.openclaw/skills/mysearch \
+  --repo-root "$(pwd)"
+```
+
+如果你要直接替换旧的 Tavily skill：
+
+```bash
+bash openclaw/scripts/install_openclaw_skill.sh \
+  --install-to ~/.openclaw/skills/mysearch \
+  --repo-root "$(pwd)" \
+  --replace-skill tavily
+```
+
+安装完成后先验收：
+
+```bash
+python3 ~/.openclaw/skills/mysearch/scripts/mysearch_openclaw.py health
+```
+
 ### 2. 启动 Proxy 控制台
 
 准备 Proxy 配置：
@@ -188,6 +220,7 @@ MySearch-Proxy/
 ├── docs/
 │   └── mysearch-architecture.md
 ├── mysearch/
+├── openclaw/
 ├── proxy/
 ├── skill/
 └── install.sh
@@ -196,6 +229,7 @@ MySearch-Proxy/
 ## 文档入口
 
 - [mysearch/README.md](./mysearch/README.md)
+- [openclaw/SKILL.md](./openclaw/SKILL.md)
 - [proxy/README.md](./proxy/README.md)
 - [docs/mysearch-architecture.md](./docs/mysearch-architecture.md)
 - [skill/SKILL.md](./skill/SKILL.md)

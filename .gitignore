@@ -17,12 +17,17 @@ firecrawl_accounts.txt
 # MySearch / proxy 本地配置
 mysearch/.env
 proxy/.env
+openclaw/.env
 
 # proxy 运行时数据
 proxy/data/
 *.db
 *.sqlite
 *.sqlite3
+
+# OpenClaw skill 本地运行时
+openclaw/runtime/
+openclaw/.venv/
 
 # 本地测试输出
 htmlcov/
