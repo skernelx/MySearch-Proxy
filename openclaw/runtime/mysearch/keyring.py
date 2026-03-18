@@ -23,11 +23,13 @@ class MySearchKeyRing:
         self._keys: dict[str, list[KeyRecord]] = {
             "tavily": [],
             "firecrawl": [],
+            "exa": [],
             "xai": [],
         }
         self._indexes = {
             "tavily": 0,
             "firecrawl": 0,
+            "exa": 0,
             "xai": 0,
         }
         self.reload()
@@ -36,6 +38,7 @@ class MySearchKeyRing:
         with self._lock:
             self._keys["tavily"] = self._load_provider(self.config.tavily)
             self._keys["firecrawl"] = self._load_provider(self.config.firecrawl)
+            self._keys["exa"] = self._load_provider(self.config.exa)
             self._keys["xai"] = self._load_provider(self.config.xai)
             for provider, keys in self._keys.items():
                 if self._indexes[provider] >= len(keys):

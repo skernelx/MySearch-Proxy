@@ -12,6 +12,7 @@ MODULE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = MODULE_DIR.parent
 AuthMode = Literal["bearer", "body"]
 XAISearchMode = Literal["official", "compatible"]
+MCPTransport = Literal["stdio", "sse", "streamable-http"]
 
 
 def _load_env_file(env_path: Path) -> None:
@@ -95,6 +96,35 @@ def _resolve_path(*names: str, default_name: str | None = None) -> Path | None:
     return None
 
 
+def _provider_base_url(
+    *,
+    explicit_names: tuple[str, ...],
+    proxy_base_url: str,
+    default: str,
+) -> str:
+    explicit = _get_str(*explicit_names)
+    if explicit:
+        return _normalize_base_url(explicit)
+    if proxy_base_url:
+        return _normalize_base_url(proxy_base_url)
+    return _normalize_base_url(default)
+
+
+def _provider_path(
+    *,
+    explicit_name: str,
+    proxy_base_url: str,
+    proxy_default: str,
+    default: str,
+) -> str:
+    explicit = _get_str(explicit_name)
+    if explicit:
+        return _normalize_path(explicit)
+    if proxy_base_url:
+        return _normalize_path(proxy_default)
+    return _normalize_path(default)
+
+
 _load_dotenv()
 
 
@@ -124,12 +154,21 @@ class MySearchConfig:
     server_name: str
     timeout_seconds: int
     xai_model: str
+    mcp_host: str
+    mcp_port: int
+    mcp_mount_path: str
+    mcp_sse_path: str
+    mcp_streamable_http_path: str
+    mcp_stateless_http: bool
     tavily: ProviderConfig
     firecrawl: ProviderConfig
+    exa: ProviderConfig
     xai: ProviderConfig
 
     @classmethod
     def from_env(cls) -> "MySearchConfig":
+        proxy_base_url = _get_str("MYSEARCH_PROXY_BASE_URL")
+        proxy_api_key = _get_str("MYSEARCH_PROXY_API_KEY")
         return cls(
             server_name=_get_str("MYSEARCH_NAME", "MYSEARCH_SERVER_NAME", default="MySearch"),
             timeout_seconds=_get_int("MYSEARCH_TIMEOUT_SECONDS", 45),
@@ -137,26 +176,49 @@ class MySearchConfig:
                 "MYSEARCH_XAI_MODEL",
                 default="grok-4.20-beta-latest-non-reasoning",
             ),
+            mcp_host=_get_str("MYSEARCH_MCP_HOST", default="127.0.0.1"),
+            mcp_port=_get_int("MYSEARCH_MCP_PORT", 8000),
+            mcp_mount_path=_normalize_path(_get_str("MYSEARCH_MCP_MOUNT_PATH", default="/")),
+            mcp_sse_path=_normalize_path(_get_str("MYSEARCH_MCP_SSE_PATH", default="/sse")),
+            mcp_streamable_http_path=_normalize_path(
+                _get_str("MYSEARCH_MCP_STREAMABLE_HTTP_PATH", default="/mcp")
+            ),
+            mcp_stateless_http=_get_bool("MYSEARCH_MCP_STATELESS_HTTP", False),
             tavily=ProviderConfig(
                 name="tavily",
-                base_url=_normalize_base_url(
-                    _get_str("MYSEARCH_TAVILY_BASE_URL", default="https://api.tavily.com")
+                base_url=_provider_base_url(
+                    explicit_names=("MYSEARCH_TAVILY_BASE_URL",),
+                    proxy_base_url=proxy_base_url,
+                    default="https://api.tavily.com",
                 ),
-                auth_mode=_get_str("MYSEARCH_TAVILY_AUTH_MODE", default="body"),  # type: ignore[arg-type]
+                auth_mode=_get_str(
+                    "MYSEARCH_TAVILY_AUTH_MODE",
+                    default="bearer" if proxy_base_url else "body",
+                ),  # type: ignore[arg-type]
                 auth_header=_get_str("MYSEARCH_TAVILY_AUTH_HEADER", default="Authorization"),
                 auth_scheme=_get_str("MYSEARCH_TAVILY_AUTH_SCHEME", default="Bearer"),
                 auth_field=_get_str("MYSEARCH_TAVILY_AUTH_FIELD", default="api_key"),
                 default_paths={
-                    "search": _normalize_path(
-                        _get_str("MYSEARCH_TAVILY_SEARCH_PATH", default="/search")
+                    "search": _provider_path(
+                        explicit_name="MYSEARCH_TAVILY_SEARCH_PATH",
+                        proxy_base_url=proxy_base_url,
+                        proxy_default="/api/search",
+                        default="/search",
                     ),
-                    "extract": _normalize_path(
-                        _get_str("MYSEARCH_TAVILY_EXTRACT_PATH", default="/extract")
+                    "extract": _provider_path(
+                        explicit_name="MYSEARCH_TAVILY_EXTRACT_PATH",
+                        proxy_base_url=proxy_base_url,
+                        proxy_default="/api/extract",
+                        default="/extract",
                     ),
                 },
                 api_keys=[
                     *_get_list("MYSEARCH_TAVILY_API_KEYS"),
-                    *([_get_str("MYSEARCH_TAVILY_API_KEY")] if _get_str("MYSEARCH_TAVILY_API_KEY") else []),
+                    *(
+                        [_get_str("MYSEARCH_TAVILY_API_KEY")]
+                        if _get_str("MYSEARCH_TAVILY_API_KEY")
+                        else ([proxy_api_key] if proxy_api_key else [])
+                    ),
                 ],
                 keys_file=_resolve_path(
                     "MYSEARCH_TAVILY_KEYS_FILE",
@@ -166,22 +228,27 @@ class MySearchConfig:
             ),
             firecrawl=ProviderConfig(
                 name="firecrawl",
-                base_url=_normalize_base_url(
-                    _get_str(
-                        "MYSEARCH_FIRECRAWL_BASE_URL",
-                        default="https://api.firecrawl.dev",
-                    )
+                base_url=_provider_base_url(
+                    explicit_names=("MYSEARCH_FIRECRAWL_BASE_URL",),
+                    proxy_base_url=proxy_base_url,
+                    default="https://api.firecrawl.dev",
                 ),
                 auth_mode=_get_str("MYSEARCH_FIRECRAWL_AUTH_MODE", default="bearer"),  # type: ignore[arg-type]
                 auth_header=_get_str("MYSEARCH_FIRECRAWL_AUTH_HEADER", default="Authorization"),
                 auth_scheme=_get_str("MYSEARCH_FIRECRAWL_AUTH_SCHEME", default="Bearer"),
                 auth_field=_get_str("MYSEARCH_FIRECRAWL_AUTH_FIELD", default="api_key"),
                 default_paths={
-                    "search": _normalize_path(
-                        _get_str("MYSEARCH_FIRECRAWL_SEARCH_PATH", default="/v2/search")
+                    "search": _provider_path(
+                        explicit_name="MYSEARCH_FIRECRAWL_SEARCH_PATH",
+                        proxy_base_url=proxy_base_url,
+                        proxy_default="/firecrawl/v2/search",
+                        default="/v2/search",
                     ),
-                    "scrape": _normalize_path(
-                        _get_str("MYSEARCH_FIRECRAWL_SCRAPE_PATH", default="/v2/scrape")
+                    "scrape": _provider_path(
+                        explicit_name="MYSEARCH_FIRECRAWL_SCRAPE_PATH",
+                        proxy_base_url=proxy_base_url,
+                        proxy_default="/firecrawl/v2/scrape",
+                        default="/v2/scrape",
                     ),
                 },
                 api_keys=[
@@ -189,13 +256,46 @@ class MySearchConfig:
                     *(
                         [_get_str("MYSEARCH_FIRECRAWL_API_KEY")]
                         if _get_str("MYSEARCH_FIRECRAWL_API_KEY")
-                        else []
+                        else ([proxy_api_key] if proxy_api_key else [])
                     ),
                 ],
                 keys_file=_resolve_path(
                     "MYSEARCH_FIRECRAWL_KEYS_FILE",
                     "MYSEARCH_FIRECRAWL_ACCOUNTS_FILE",
                     default_name="firecrawl_accounts.txt",
+                ),
+            ),
+            exa=ProviderConfig(
+                name="exa",
+                base_url=_provider_base_url(
+                    explicit_names=("MYSEARCH_EXA_BASE_URL",),
+                    proxy_base_url=proxy_base_url,
+                    default="https://api.exa.ai",
+                ),
+                auth_mode=_get_str("MYSEARCH_EXA_AUTH_MODE", default="bearer"),  # type: ignore[arg-type]
+                auth_header=_get_str("MYSEARCH_EXA_AUTH_HEADER", default="x-api-key"),
+                auth_scheme=_get_str("MYSEARCH_EXA_AUTH_SCHEME", default=""),
+                auth_field=_get_str("MYSEARCH_EXA_AUTH_FIELD", default="api_key"),
+                default_paths={
+                    "search": _provider_path(
+                        explicit_name="MYSEARCH_EXA_SEARCH_PATH",
+                        proxy_base_url=proxy_base_url,
+                        proxy_default="/exa/search",
+                        default="/search",
+                    ),
+                },
+                api_keys=[
+                    *_get_list("MYSEARCH_EXA_API_KEYS"),
+                    *(
+                        [_get_str("MYSEARCH_EXA_API_KEY")]
+                        if _get_str("MYSEARCH_EXA_API_KEY")
+                        else ([proxy_api_key] if proxy_api_key else [])
+                    ),
+                ],
+                keys_file=_resolve_path(
+                    "MYSEARCH_EXA_KEYS_FILE",
+                    "MYSEARCH_EXA_ACCOUNTS_FILE",
+                    default_name="exa_accounts.txt",
                 ),
             ),
             xai=ProviderConfig(
@@ -211,19 +311,29 @@ class MySearchConfig:
                     "responses": _normalize_path(
                         _get_str("MYSEARCH_XAI_RESPONSES_PATH", default="/responses")
                     ),
-                    "social_search": _normalize_path(
-                        _get_str("MYSEARCH_XAI_SOCIAL_SEARCH_PATH", default="/social/search")
+                    "social_search": _provider_path(
+                        explicit_name="MYSEARCH_XAI_SOCIAL_SEARCH_PATH",
+                        proxy_base_url=proxy_base_url,
+                        proxy_default="/social/search",
+                        default="/social/search",
                     ),
                 },
                 alternate_base_urls={
                     "social_search": _normalize_base_url(
-                        _get_str("MYSEARCH_XAI_SOCIAL_BASE_URL")
+                        _get_str("MYSEARCH_XAI_SOCIAL_BASE_URL") or proxy_base_url
                     )
                 },
-                search_mode=_get_str("MYSEARCH_XAI_SEARCH_MODE", default="official"),  # type: ignore[arg-type]
+                search_mode=_get_str(
+                    "MYSEARCH_XAI_SEARCH_MODE",
+                    default="compatible" if proxy_base_url else "official",
+                ),  # type: ignore[arg-type]
                 api_keys=[
                     *_get_list("MYSEARCH_XAI_API_KEYS"),
-                    *([_get_str("MYSEARCH_XAI_API_KEY")] if _get_str("MYSEARCH_XAI_API_KEY") else []),
+                    *(
+                        [_get_str("MYSEARCH_XAI_API_KEY")]
+                        if _get_str("MYSEARCH_XAI_API_KEY")
+                        else ([proxy_api_key] if proxy_api_key else [])
+                    ),
                 ],
                 keys_file=_resolve_path("MYSEARCH_XAI_KEYS_FILE"),
             ),

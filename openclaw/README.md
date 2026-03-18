@@ -60,7 +60,18 @@
 cp openclaw/.env.example openclaw/.env
 ```
 
-最小配置先填：
+推荐先填：
+
+```env
+MYSEARCH_PROXY_BASE_URL=https://search.hunters.works
+MYSEARCH_PROXY_API_KEY=your-mysearch-token
+```
+
+这两项配好后，`Tavily / Firecrawl / Exa` 会默认一起走统一 proxy。
+如果你的 proxy 同时接通了 `Social / X`，这套 token 也会继续复用，不需要再给
+OpenClaw 单独拆一套客户端 token。
+
+如果你暂时没有 proxy，再退回直连 provider：
 
 ```env
 MYSEARCH_TAVILY_API_KEY=tvly-...
@@ -135,12 +146,19 @@ clawhub install <skill-slug>
 
 ## 最推荐的 provider 接法
 
-最推荐的组合仍然是：
+最推荐的组合现在是：
+
+- 先部署 `MySearch Proxy`
+- 再让 OpenClaw 版 MySearch skill 只接：
+  - `MYSEARCH_PROXY_BASE_URL`
+  - `MYSEARCH_PROXY_API_KEY`
+
+如果你还没有统一 proxy，也可以继续：
 
 - 先用
   [skernelx/tavily-key-generator](https://github.com/skernelx/tavily-key-generator)
   作为 Tavily / Firecrawl provider 层
-- 再让 OpenClaw 版 MySearch skill 接这层统一入口
+- 再让 OpenClaw 版 MySearch skill 直连 provider key
 
 如果用户没有 X / Social：
 

@@ -34,7 +34,7 @@ ResolvedSearchIntent = Literal[
     "resource",
 ]
 SearchStrategy = Literal["auto", "fast", "balanced", "verify", "deep"]
-ProviderName = Literal["auto", "tavily", "firecrawl", "xai"]
+ProviderName = Literal["auto", "tavily", "firecrawl", "exa", "xai"]
 
 
 class MySearchError(RuntimeError):
@@ -65,12 +65,26 @@ class MySearchClient:
             "server_name": self.config.server_name,
             "timeout_seconds": self.config.timeout_seconds,
             "xai_model": self.config.xai_model,
+            "mcp": {
+                "default_transport": "stdio",
+                "host": self.config.mcp_host,
+                "port": self.config.mcp_port,
+                "mount_path": self.config.mcp_mount_path,
+                "sse_path": self.config.mcp_sse_path,
+                "streamable_http_path": self.config.mcp_streamable_http_path,
+                "stateless_http": self.config.mcp_stateless_http,
+                "streamable_http_url": (
+                    f"http://{self.config.mcp_host}:{self.config.mcp_port}"
+                    f"{self.config.mcp_streamable_http_path}"
+                ),
+            },
             "providers": {
                 "tavily": self._describe_provider(self.config.tavily, keyring_info["tavily"]),
                 "firecrawl": self._describe_provider(
                     self.config.firecrawl,
                     keyring_info["firecrawl"],
                 ),
+                "exa": self._describe_provider(self.config.exa, keyring_info["exa"]),
                 "xai": self._describe_provider(self.config.xai, keyring_info["xai"]),
             },
         }
@@ -194,6 +208,14 @@ class MySearchClient:
                 max_results=max_results,
                 categories=decision.firecrawl_categories or [],
                 include_content=include_content or mode in {"docs", "research", "github", "pdf"},
+            )
+        elif decision.provider == "exa":
+            result = self._search_exa(
+                query=query,
+                max_results=max_results,
+                include_domains=include_domains,
+                exclude_domains=exclude_domains,
+                include_content=include_content,
             )
         elif decision.provider == "xai":
             result = self._search_xai(
@@ -413,6 +435,11 @@ class MySearchClient:
                     reason="显式指定 Firecrawl",
                     firecrawl_categories=self._firecrawl_categories(mode, intent),
                 )
+            if provider == "exa":
+                return RouteDecision(
+                    provider="exa",
+                    reason="显式指定 Exa",
+                )
             if provider == "xai":
                 return RouteDecision(
                     provider="xai",
@@ -440,6 +467,11 @@ class MySearchClient:
             )
 
         if mode in {"docs", "github", "pdf"}:
+            if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+                return RouteDecision(
+                    provider="exa",
+                    reason="Firecrawl 未配置，文档类查询回退到 Exa",
+                )
             return RouteDecision(
                 provider="firecrawl",
                 reason="文档 / GitHub / PDF 内容优先走 Firecrawl",
@@ -447,6 +479,11 @@ class MySearchClient:
             )
 
         if include_content:
+            if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+                return RouteDecision(
+                    provider="exa",
+                    reason="Firecrawl 未配置，正文查询回退到 Exa",
+                )
             return RouteDecision(
                 provider="firecrawl",
                 reason="请求里需要正文内容，优先用 Firecrawl search + scrape",
@@ -454,6 +491,11 @@ class MySearchClient:
             )
 
         if intent in {"news", "status"} or mode == "news" or self._looks_like_news_query(query_lower):
+            if not self.keyring.has_provider("tavily") and self.keyring.has_provider("exa"):
+                return RouteDecision(
+                    provider="exa",
+                    reason="Tavily 未配置，新闻 / 状态类查询回退到 Exa",
+                )
             return RouteDecision(
                 provider="tavily",
                 reason="状态 / 新闻类查询默认走 Tavily",
@@ -461,6 +503,11 @@ class MySearchClient:
             )
 
         if intent == "resource" or self._looks_like_docs_query(query_lower):
+            if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+                return RouteDecision(
+                    provider="exa",
+                    reason="Firecrawl 未配置，resource / docs 类查询回退到 Exa",
+                )
             return RouteDecision(
                 provider="firecrawl",
                 reason="resource / docs 类查询优先走 Firecrawl",
@@ -468,10 +515,21 @@ class MySearchClient:
             )
 
         if mode == "research":
+            if not self.keyring.has_provider("tavily") and self.keyring.has_provider("exa"):
+                return RouteDecision(
+                    provider="exa",
+                    reason="Tavily 未配置，research 发现阶段回退到 Exa",
+                )
             return RouteDecision(
                 provider="tavily",
                 reason="research 模式先用 Tavily 做发现，再按策略决定是否扩展验证",
                 tavily_topic="general",
+            )
+
+        if not self.keyring.has_provider("tavily") and self.keyring.has_provider("exa"):
+            return RouteDecision(
+                provider="exa",
+                reason="Tavily 未配置，普通网页检索回退到 Exa",
             )
 
         return RouteDecision(
@@ -740,6 +798,74 @@ class MySearchClient:
             "transport": key.source,
             "query": query,
             "answer": "",
+            "results": results,
+            "citations": [
+                {"title": item.get("title", ""), "url": item.get("url", "")}
+                for item in results
+                if item.get("url")
+            ],
+        }
+
+    def _search_exa(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        include_domains: list[str] | None,
+        exclude_domains: list[str] | None,
+        include_content: bool,
+    ) -> dict[str, Any]:
+        provider = self.config.exa
+        key = self._get_key_or_raise(provider)
+        payload: dict[str, Any] = {
+            "query": query,
+            "numResults": max_results,
+        }
+        if include_content:
+            payload["text"] = True
+        if include_domains:
+            payload["includeDomains"] = include_domains
+        if exclude_domains:
+            payload["excludeDomains"] = exclude_domains
+
+        response = self._request_json(
+            provider=provider,
+            method="POST",
+            path=provider.path("search"),
+            payload=payload,
+            key=key.key,
+        )
+        raw_results = response.get("results") or response.get("data") or []
+        results = []
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            snippet = (
+                item.get("snippet")
+                or item.get("text")
+                or item.get("summary")
+                or item.get("highlight")
+                or ""
+            )
+            content = item.get("text") if include_content else ""
+            results.append(
+                {
+                    "provider": "exa",
+                    "source": "web",
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "snippet": snippet,
+                    "content": content or "",
+                    "score": item.get("score"),
+                    "published_date": item.get("publishedDate") or item.get("published_date") or "",
+                }
+            )
+
+        return {
+            "provider": "exa",
+            "transport": key.source,
+            "query": response.get("query", query),
+            "answer": response.get("answer", ""),
             "results": results,
             "citations": [
                 {"title": item.get("title", ""), "url": item.get("url", "")}
@@ -1264,6 +1390,11 @@ class MySearchClient:
                     "Tavily + Firecrawl for web/docs/extract. Add "
                     "MYSEARCH_XAI_API_KEY for official xAI, or configure a "
                     "compatible /social/search gateway to enable mode='social'."
+                )
+            if provider.name == "exa":
+                raise MySearchError(
+                    "Exa search is not configured. Add MYSEARCH_EXA_API_KEY, "
+                    "or point MYSEARCH_EXA_BASE_URL to your proxy / compatible gateway."
                 )
             raise MySearchError(f"{provider.name} is not configured")
         return record
