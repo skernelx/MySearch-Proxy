@@ -509,7 +509,7 @@ body.modal-open {
 
 .summary-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -992,14 +992,21 @@ body.modal-open {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.72));
 }
 
+.summary-box {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  min-height: 126px;
+}
+
 .summary-box::after,
 .stat-box::after {
   content: "";
   position: absolute;
-  width: 110px;
-  height: 110px;
-  right: -28px;
-  bottom: -48px;
+  width: 96px;
+  height: 96px;
+  right: -24px;
+  bottom: -42px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.03);
 }
@@ -1031,6 +1038,11 @@ body.modal-open {
   font-size: 12px;
   margin-top: 6px;
   line-height: 1.5;
+}
+
+.summary-box .hint {
+  margin-top: auto;
+  padding-top: 10px;
 }
 
 .service-panel {
@@ -1323,7 +1335,17 @@ tr:last-child td { border-bottom: none; }
   margin-top: 8px;
 }
 
+@media (max-width: 1320px) {
+  .summary-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1080px) {
+  .summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .service-head,
   .section-grid,
   .guide-shell {
@@ -1851,6 +1873,20 @@ h3,
   font-size: 11px;
 }
 
+.summary-box .label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+.summary-box .value {
+  font-size: clamp(24px, 2vw, 32px);
+}
+
+.summary-box .hint {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .switcher-shell {
   border: 1px solid rgba(17, 24, 39, 0.08);
   background:
@@ -2188,9 +2224,7 @@ textarea:focus {
     padding-right: 18px;
   }
 
-  .summary-strip {
-    gap: 12px;
-  }
+  .summary-strip { grid-template-columns: 1fr; gap: 12px; }
 
   .summary-box,
   .stat-box,
@@ -3429,34 +3463,34 @@ function renderGlobalSummary(services, social) {
 
   document.getElementById('global-summary').innerHTML = `
     <div class="summary-box">
-      <div class="label">代理 Token 总数</div>
+      <div class="label">代理 Token</div>
       <div class="value">${fmtNum(totalTokens)}</div>
-      <div class="hint">共 ${fmtNum(totalKeys)} 个已导入 Key，Tavily / Exa / Firecrawl 分别签发，不会混用</div>
+      <div class="hint">${fmtNum(totalKeys)} 个 Key 已导入，按服务独立签发</div>
     </div>
     <div class="summary-box">
-      <div class="label">今日代理调用</div>
+      <div class="label">今日调用</div>
       <div class="value">${fmtNum(todayCount)}</div>
-      <div class="hint">来自本地 usage_logs 聚合统计</div>
+      <div class="hint">来自本地 usage_logs 聚合</div>
     </div>
     <div class="summary-box">
-      <div class="label">真实剩余额度</div>
+      <div class="label">官方剩余</div>
       <div class="value">${fmtNum(realRemaining)}</div>
-      <div class="hint">已同步 ${fmtNum(syncedKeys)} 个 Key，当前只汇总支持官方同步的服务：${escapeHtml(syncableLabels)}</div>
+      <div class="hint">已同步 ${fmtNum(syncedKeys)} 个 Key · ${escapeHtml(syncableLabels)}</div>
     </div>
     <div class="summary-box">
-      <div class="label">Social / X Token</div>
+      <div class="label">Social / X</div>
       <div class="value">${fmtNum(socialStats.token_total || 0)}</div>
-      <div class="hint">${social?.admin_connected ? `模式 ${socialMode}` : '等待 grok2api 后台接入'}</div>
+      <div class="hint">${social?.admin_connected ? `模式 ${socialMode}` : '等待后台接通'}</div>
     </div>
     <div class="summary-box">
-      <div class="label">Social Chat 剩余</div>
+      <div class="label">Social Chat</div>
       <div class="value">${fmtNum(socialStats.chat_remaining || 0)}</div>
-      <div class="hint">Image ${fmtNum(socialStats.image_remaining || 0)} · X Router 总调用 ${fmtNum(socialStats.total_calls || 0)}</div>
+      <div class="hint">Image ${fmtNum(socialStats.image_remaining || 0)} · 调用 ${fmtNum(socialStats.total_calls || 0)}</div>
     </div>
     <div class="summary-box">
-      <div class="label">MySearch 通用 Token</div>
+      <div class="label">MySearch Token</div>
       <div class="value">${fmtNum(latestMySearch?.token_count || 0)}</div>
-      <div class="hint">给 MCP / Skill / 上层客户端直接使用，一套 token 统一接入当前 proxy</div>
+      <div class="hint">给 MCP / Skill / 客户端统一接入</div>
     </div>
   `;
 }
