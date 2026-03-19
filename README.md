@@ -84,9 +84,9 @@ MySearch MCP / Codex Skill / OpenClaw Skill
 如果你暂时还没有 Proxy，也可以让 `mysearch/` 或 `openclaw/` 直接连官方
 provider。
 
-## 最新优化（v0.1.9）
+## 最新优化（v0.1.10）
 
-这次版本重点是把配置入口收成 `config-first`，同时补上 Python 3.10 兼容，避免 OpenClaw skill 在旧 Python 上因为 `tomllib` 缺失直接导入失败；上一版 docs 排序与 Social / X fallback 继续保留。
+这次版本重点是把配置入口收成 `config-first`，同时补上 Python 3.10 兼容，避免 OpenClaw skill 在旧 Python 上因为 `tomllib` 缺失直接导入失败；并继续补上 Firecrawl 在 docs + `include_domains` 下的域名过滤回退，避免只要 `site:` 查询失手就直接掉到空结果。
 
 - 配置入口收口：
   - `MySearch` runtime 现在会优先读取 `~/.codex/config.toml` 的 `mcp_servers.mysearch.env`。
@@ -100,6 +100,7 @@ provider。
   - 显式传了 `include_domains` 时，会进一步把命中域名的结果稳定放到前面。
   - `reddit / arxiv / researchgate / medium / youtube` 这类明显第三方页面不再轻易抢前几条。
   - `citations` 会跟随重排后的结果顺序，避免前排已经修正但引用顺序还是旧的。
+  - Firecrawl 如果在 `site:domain query` 这一跳返回空结果，会自动做一轮无 `site:` 的 Firecrawl 检索，再在客户端按域名过滤，优先把结果留在 Firecrawl 链路里，而不是立刻退回 Tavily。
 
 - 路由与参数稳定性：
   - MCP 入口现在兼容单字符串形式的 `sources`、`include_domains`、`formats` 等参数。
@@ -125,7 +126,7 @@ provider。
 - 健康检查增强：
   - `mysearch_health` / `health` 现在会返回 `runtime`、`routing_defaults`、`cache`。
 - OpenClaw 同步：
-  - `openclaw` bundle 将随本次发布同步到 `mysearch@0.1.9`。
+  - `openclaw` bundle 将随本次发布同步到 `mysearch@0.1.10`。
 
 新增运行时参数：
 

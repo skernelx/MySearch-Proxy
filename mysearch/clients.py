@@ -1322,6 +1322,7 @@ class MySearchClient:
             per_domain_results = []
             citations = []
             seen_urls: set[str] = set()
+            retried_domains: list[str] = []
             for domain in include_domains:
                 domain_result = self._search_firecrawl_once(
                     query=self._build_firecrawl_domain_query(
@@ -1333,6 +1334,18 @@ class MySearchClient:
                     categories=categories,
                     include_content=include_content,
                 )
+                if not domain_result.get("results"):
+                    retry_result = self._search_firecrawl_domain_retry(
+                        query=query,
+                        max_results=max_results,
+                        categories=categories,
+                        include_content=include_content,
+                        include_domain=domain,
+                        exclude_domains=exclude_domains,
+                    )
+                    if retry_result is not None:
+                        domain_result = retry_result
+                        retried_domains.append(domain)
                 per_domain_results.append(domain_result)
                 for item in domain_result.get("results", []):
                     url = item.get("url", "")
@@ -1355,7 +1368,7 @@ class MySearchClient:
                 )
                 if fallback_result is not None:
                     return fallback_result
-            return {
+            response = {
                 "provider": "firecrawl",
                 "transport": per_domain_results[0].get("transport", "env") if per_domain_results else "env",
                 "query": query,
@@ -1363,6 +1376,12 @@ class MySearchClient:
                 "results": merged_results,
                 "citations": citations[:max_results],
             }
+            if retried_domains:
+                response["route_debug"] = {
+                    "domain_filter_mode": "client_filter_retry",
+                    "retried_include_domains": retried_domains,
+                }
+            return response
 
         return self._search_firecrawl_once(
             query=self._build_firecrawl_domain_query(
@@ -1424,6 +1443,51 @@ class MySearchClient:
                 "from": "firecrawl",
                 "to": "tavily",
                 "reason": "firecrawl returned 0 results for domain-filtered search",
+            },
+        }
+
+    def _search_firecrawl_domain_retry(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        categories: list[str],
+        include_content: bool,
+        include_domain: str,
+        exclude_domains: list[str] | None,
+    ) -> dict[str, Any] | None:
+        retry_result = self._search_firecrawl_once(
+            query=self._build_firecrawl_domain_query(
+                query=query,
+                include_domain=None,
+                exclude_domains=exclude_domains,
+            ),
+            max_results=max_results,
+            categories=categories,
+            include_content=include_content,
+        )
+        filtered_results = self._filter_results_by_domains(
+            retry_result.get("results", []),
+            include_domains=[include_domain],
+            exclude_domains=exclude_domains,
+        )
+        if not filtered_results:
+            return None
+
+        return {
+            "provider": "firecrawl",
+            "transport": retry_result.get("transport", "env"),
+            "query": query,
+            "answer": retry_result.get("answer", ""),
+            "results": filtered_results[:max_results],
+            "citations": [
+                {"title": item.get("title", ""), "url": item.get("url", "")}
+                for item in filtered_results
+                if item.get("url")
+            ][:max_results],
+            "route_debug": {
+                "domain_filter_mode": "client_filter_retry",
+                "include_domain": include_domain,
             },
         }
 
@@ -1530,6 +1594,27 @@ class MySearchClient:
                 break
 
         return merged
+
+    def _filter_results_by_domains(
+        self,
+        results: list[dict[str, Any]],
+        *,
+        include_domains: list[str] | None,
+        exclude_domains: list[str] | None,
+    ) -> list[dict[str, Any]]:
+        filtered: list[dict[str, Any]] = []
+        for item in results:
+            hostname = self._result_hostname(item)
+            if include_domains and not any(
+                self._domain_matches(hostname, domain) for domain in include_domains
+            ):
+                continue
+            if exclude_domains and any(
+                self._domain_matches(hostname, domain) for domain in exclude_domains
+            ):
+                continue
+            filtered.append(dict(item))
+        return filtered
 
     def _search_exa(
         self,

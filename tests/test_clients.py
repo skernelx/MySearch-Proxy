@@ -107,6 +107,82 @@ class MySearchClientTests(unittest.TestCase):
         self.assertEqual(result["fallback"]["to"], "tavily")
         self.assertEqual(len(result["results"]), 1)
 
+    def test_firecrawl_domain_filtered_search_retries_without_site_filter(self) -> None:
+        client = MySearchClient()
+        client.keyring.has_provider = lambda provider: False  # type: ignore[method-assign]
+
+        def fake_search_firecrawl_once(**kwargs):  # type: ignore[no-untyped-def]
+            query = kwargs["query"]
+            if query.startswith("site:docs.firecrawl.dev "):
+                return {
+                    "provider": "firecrawl",
+                    "transport": "env",
+                    "query": query,
+                    "answer": "",
+                    "results": [],
+                    "citations": [],
+                }
+            return {
+                "provider": "firecrawl",
+                "transport": "env",
+                "query": query,
+                "answer": "",
+                "results": [
+                    {
+                        "provider": "firecrawl",
+                        "source": "web",
+                        "title": "Scrape - Firecrawl Docs",
+                        "url": "https://docs.firecrawl.dev/api-reference/endpoint/scrape",
+                        "snippet": "Official Firecrawl docs",
+                        "content": "",
+                    },
+                    {
+                        "provider": "firecrawl",
+                        "source": "web",
+                        "title": "Firecrawl tutorial recap",
+                        "url": "https://example.com/firecrawl-scrape-guide",
+                        "snippet": "Third-party recap",
+                        "content": "",
+                    },
+                ],
+                "citations": [
+                    {
+                        "title": "Scrape - Firecrawl Docs",
+                        "url": "https://docs.firecrawl.dev/api-reference/endpoint/scrape",
+                    },
+                    {
+                        "title": "Firecrawl tutorial recap",
+                        "url": "https://example.com/firecrawl-scrape-guide",
+                    },
+                ],
+            }
+
+        client._search_firecrawl_once = fake_search_firecrawl_once  # type: ignore[method-assign]
+
+        result = client._search_firecrawl(
+            query="Firecrawl docs scrape api",
+            max_results=5,
+            categories=["technical"],
+            include_content=False,
+            include_domains=["docs.firecrawl.dev"],
+            exclude_domains=None,
+        )
+
+        self.assertEqual(result["provider"], "firecrawl")
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(
+            result["results"][0]["url"],
+            "https://docs.firecrawl.dev/api-reference/endpoint/scrape",
+        )
+        self.assertEqual(
+            result["route_debug"]["domain_filter_mode"],
+            "client_filter_retry",
+        )
+        self.assertEqual(
+            result["route_debug"]["retried_include_domains"],
+            ["docs.firecrawl.dev"],
+        )
+
     def test_docs_blended_search_reranks_official_results_ahead_of_third_party(self) -> None:
         client = MySearchClient()
         official_url = "https://platform.openai.com/docs/api-reference/responses"
