@@ -11,6 +11,26 @@ from mysearch.clients import MySearchClient
 from mysearch.config import MCPTransport, MySearchConfig
 
 
+def _ensure_list(value: str | list[str] | None) -> list[str] | None:
+    """兼容单值字符串输入，避免模型把单元素数组写成标量时直接校验失败。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value]
+    return value
+
+
+def _ensure_sources(
+    value: Literal["web", "x"] | list[Literal["web", "x"]] | None,
+) -> list[Literal["web", "x"]] | None:
+    """兼容 sources 传单个字符串的情况。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value]
+    return value
+
+
 def build_mcp(config: MySearchConfig) -> tuple[MySearchClient, FastMCP]:
     client = MySearchClient(config)
     mcp = FastMCP(
@@ -40,34 +60,37 @@ def build_mcp(config: MySearchConfig) -> tuple[MySearchClient, FastMCP]:
         ] = "auto",
         strategy: Literal["auto", "fast", "balanced", "verify", "deep"] = "auto",
         provider: Literal["auto", "tavily", "firecrawl", "exa", "xai"] = "auto",
-        sources: list[Literal["web", "x"]] | None = None,
+        sources: Literal["web", "x"] | list[Literal["web", "x"]] | None = None,
         max_results: int = 5,
         include_content: bool = False,
         include_answer: bool = True,
-        include_domains: list[str] | None = None,
-        exclude_domains: list[str] | None = None,
-        allowed_x_handles: list[str] | None = None,
-        excluded_x_handles: list[str] | None = None,
+        include_domains: str | list[str] | None = None,
+        exclude_domains: str | list[str] | None = None,
+        allowed_x_handles: str | list[str] | None = None,
+        excluded_x_handles: str | list[str] | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
         include_x_images: bool = False,
         include_x_videos: bool = False,
     ) -> dict:
-        """统一搜索入口。按任务类型自动选择 Tavily / Firecrawl / Exa / xAI。"""
+        """统一搜索入口。按任务类型自动选择 Tavily / Firecrawl / Exa / xAI。
+
+        对 list 参数做了宽容处理：即使模型把单元素数组误传成字符串，也会自动转成列表。
+        """
         return client.search(
             query=query,
             mode=mode,
             intent=intent,
             strategy=strategy,
             provider=provider,
-            sources=sources,
+            sources=_ensure_sources(sources),
             max_results=max_results,
             include_content=include_content,
             include_answer=include_answer,
-            include_domains=include_domains,
-            exclude_domains=exclude_domains,
-            allowed_x_handles=allowed_x_handles,
-            excluded_x_handles=excluded_x_handles,
+            include_domains=_ensure_list(include_domains),
+            exclude_domains=_ensure_list(exclude_domains),
+            allowed_x_handles=_ensure_list(allowed_x_handles),
+            excluded_x_handles=_ensure_list(excluded_x_handles),
             from_date=from_date,
             to_date=to_date,
             include_x_images=include_x_images,
@@ -77,14 +100,14 @@ def build_mcp(config: MySearchConfig) -> tuple[MySearchClient, FastMCP]:
     @mcp.tool()
     def extract_url(
         url: str,
-        formats: list[str] | None = None,
+        formats: str | list[str] | None = None,
         only_main_content: bool = True,
         provider: Literal["auto", "firecrawl", "tavily"] = "auto",
     ) -> dict:
         """抓取单个 URL 的正文，默认优先 Firecrawl；失败或空正文时回退 Tavily extract。"""
         return client.extract_url(
             url=url,
-            formats=formats,
+            formats=_ensure_list(formats),
             only_main_content=only_main_content,
             provider=provider,
         )
@@ -108,10 +131,10 @@ def build_mcp(config: MySearchConfig) -> tuple[MySearchClient, FastMCP]:
             "resource",
         ] = "auto",
         strategy: Literal["auto", "fast", "balanced", "verify", "deep"] = "auto",
-        include_domains: list[str] | None = None,
-        exclude_domains: list[str] | None = None,
-        allowed_x_handles: list[str] | None = None,
-        excluded_x_handles: list[str] | None = None,
+        include_domains: str | list[str] | None = None,
+        exclude_domains: str | list[str] | None = None,
+        allowed_x_handles: str | list[str] | None = None,
+        excluded_x_handles: str | list[str] | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
     ) -> dict:
@@ -125,10 +148,10 @@ def build_mcp(config: MySearchConfig) -> tuple[MySearchClient, FastMCP]:
             mode=mode,
             intent=intent,
             strategy=strategy,
-            include_domains=include_domains,
-            exclude_domains=exclude_domains,
-            allowed_x_handles=allowed_x_handles,
-            excluded_x_handles=excluded_x_handles,
+            include_domains=_ensure_list(include_domains),
+            exclude_domains=_ensure_list(exclude_domains),
+            allowed_x_handles=_ensure_list(allowed_x_handles),
+            excluded_x_handles=_ensure_list(excluded_x_handles),
             from_date=from_date,
             to_date=to_date,
         )
