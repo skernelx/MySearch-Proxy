@@ -3954,28 +3954,83 @@ function flashButtonLabel(button, label) {
   }, 1400);
 }
 
-function clipboardWrite(text) {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    return navigator.clipboard.writeText(text);
+async function writeClipboardText(text) {
+  const value = String(text ?? '');
+
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch (error) {
+      console.warn('Clipboard API failed, falling back to execCommand copy.', error);
+    }
   }
+
   const textarea = document.createElement('textarea');
-  textarea.value = text;
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
   textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '-9999px';
   textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+
   document.body.appendChild(textarea);
+
+  const selection = document.getSelection();
+  const ranges = [];
+  if (selection) {
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      ranges.push(selection.getRangeAt(index).cloneRange());
+    }
+  }
+
+  textarea.focus({ preventScroll: true });
   textarea.select();
-  try { document.execCommand('copy'); } catch (_) {}
-  document.body.removeChild(textarea);
-  return Promise.resolve();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } finally {
+    textarea.remove();
+    if (selection) {
+      selection.removeAllRanges();
+      ranges.forEach((range) => selection.addRange(range));
+    }
+  }
+
+  if (!copied) {
+    throw new Error('Clipboard copy command was rejected');
+  }
+
+  return true;
 }
 
-function copyCode(elementId, button) {
-  const text = document.getElementById(elementId).textContent;
-  clipboardWrite(text).then(() => flashButtonLabel(button, '已复制'));
+async function copyCode(elementId, button) {
+  const source = document.getElementById(elementId);
+  if (!source) {
+    flashButtonLabel(button, '未找到');
+    return;
+  }
+
+  try {
+    await writeClipboardText(source.textContent);
+    flashButtonLabel(button, '已复制');
+  } catch (error) {
+    console.error(`Copy failed for #${elementId}`, error);
+    flashButtonLabel(button, '复制失败');
+  }
 }
 
-function copyText(value, button) {
-  clipboardWrite(value).then(() => flashButtonLabel(button, '已复制'));
+async function copyText(value, button) {
+  try {
+    await writeClipboardText(value);
+    flashButtonLabel(button, '已复制');
+  } catch (error) {
+    console.error('Copy failed for inline value', error);
+    flashButtonLabel(button, '复制失败');
+  }
 }
 
 document.addEventListener('keydown', (event) => {

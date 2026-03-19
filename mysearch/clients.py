@@ -368,6 +368,14 @@ class MySearchClient:
             sources=normalized_sources,
             include_content=include_content,
         )
+        effective_include_answer = self._should_request_search_answer(
+            requested=include_answer,
+            mode=mode,
+            intent=resolved_intent,
+            strategy=resolved_strategy,
+            include_content=include_content,
+            include_domains=include_domains,
+        )
         decision = self._route_search(
             query=query,
             mode=mode,
@@ -392,7 +400,7 @@ class MySearchClient:
                 provider=provider,
                 normalized_sources=normalized_sources,
                 include_content=include_content,
-                include_answer=include_answer,
+                include_answer=effective_include_answer,
                 include_domains=include_domains,
                 exclude_domains=exclude_domains,
                 decision=decision,
@@ -412,7 +420,7 @@ class MySearchClient:
                     resolved_strategy=resolved_strategy,
                     decision=decision,
                     include_content=include_content,
-                    include_answer=include_answer,
+                    include_answer=effective_include_answer,
                     cache_hit=True,
                 )
 
@@ -428,7 +436,7 @@ class MySearchClient:
                         sources=["web"],
                         max_results=max_results,
                         include_content=include_content,
-                        include_answer=include_answer,
+                        include_answer=effective_include_answer,
                         include_domains=include_domains,
                         exclude_domains=exclude_domains,
                     ),
@@ -469,12 +477,12 @@ class MySearchClient:
                 provider=provider,
                 normalized_sources=normalized_sources,
                 resolved_intent=resolved_intent,
-                resolved_strategy=resolved_strategy,
-                decision=decision,
-                include_content=include_content,
-                include_answer=include_answer,
-                cache_hit=False,
-            )
+                    resolved_strategy=resolved_strategy,
+                    decision=decision,
+                    include_content=include_content,
+                    include_answer=effective_include_answer,
+                    cache_hit=False,
+                )
             return hybrid_result
 
         if self._should_blend_web_providers(
@@ -490,7 +498,7 @@ class MySearchClient:
                 decision=decision,
                 max_results=max_results,
                 include_content=include_content,
-                include_answer=include_answer,
+                include_answer=effective_include_answer,
                 include_domains=include_domains,
                 exclude_domains=exclude_domains,
             )
@@ -499,7 +507,7 @@ class MySearchClient:
                 query=query,
                 max_results=max_results,
                 topic=decision.tavily_topic,
-                include_answer=include_answer,
+                include_answer=effective_include_answer,
                 include_content=include_content,
                 include_domains=include_domains,
                 exclude_domains=exclude_domains,
@@ -510,6 +518,8 @@ class MySearchClient:
                 max_results=max_results,
                 categories=decision.firecrawl_categories or [],
                 include_content=include_content or mode in {"docs", "research", "github", "pdf"},
+                include_domains=include_domains,
+                exclude_domains=exclude_domains,
             )
         elif decision.provider == "exa":
             result = self._search_exa(
@@ -562,7 +572,7 @@ class MySearchClient:
             resolved_strategy=resolved_strategy,
             decision=decision,
             include_content=include_content,
-            include_answer=include_answer,
+            include_answer=effective_include_answer,
             cache_hit=False,
         )
 
@@ -709,7 +719,7 @@ class MySearchClient:
 
         urls: list[str] = []
         if web_search.get("provider") == "hybrid":
-            candidate_results = web_search.get("web", {}).get("results", [])
+            candidate_results = web_search.get("results") or web_search.get("web", {}).get("results", [])
         else:
             candidate_results = web_search.get("results", [])
 
@@ -787,6 +797,30 @@ class MySearchClient:
             ],
         }
 
+    def _should_request_search_answer(
+        self,
+        *,
+        requested: bool,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        strategy: SearchStrategy,
+        include_content: bool,
+        include_domains: list[str] | None,
+    ) -> bool:
+        if not requested:
+            return False
+        if include_content:
+            return False
+        if include_domains:
+            return False
+        if mode in {"docs", "github", "pdf"}:
+            return False
+        if intent == "resource":
+            return False
+        if strategy in {"verify", "deep"}:
+            return False
+        return True
+
     def _route_search(
         self,
         *,
@@ -847,6 +881,23 @@ class MySearchClient:
             )
 
         if mode in {"docs", "github", "pdf"}:
+            if include_content:
+                if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+                    return RouteDecision(
+                        provider="exa",
+                        reason="Firecrawl 未配置，文档正文查询回退到 Exa",
+                    )
+                return RouteDecision(
+                    provider="firecrawl",
+                    reason="文档正文查询优先走 Firecrawl",
+                    firecrawl_categories=self._firecrawl_categories(mode, intent),
+                )
+            if self.keyring.has_provider("tavily"):
+                return RouteDecision(
+                    provider="tavily",
+                    reason="文档类查询先用 Tavily 做官方页面发现，正文再交给 Firecrawl",
+                    tavily_topic="general",
+                )
             if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
                 return RouteDecision(
                     provider="exa",
@@ -883,6 +934,23 @@ class MySearchClient:
             )
 
         if intent == "resource" or self._looks_like_docs_query(query_lower):
+            if include_content:
+                if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+                    return RouteDecision(
+                        provider="exa",
+                        reason="Firecrawl 未配置，resource 正文查询回退到 Exa",
+                    )
+                return RouteDecision(
+                    provider="firecrawl",
+                    reason="resource / docs 正文查询优先走 Firecrawl",
+                    firecrawl_categories=self._firecrawl_categories("docs", intent),
+                )
+            if self.keyring.has_provider("tavily"):
+                return RouteDecision(
+                    provider="tavily",
+                    reason="resource / docs 查询先用 Tavily 做页面发现，正文再交给 Firecrawl",
+                    tavily_topic="general",
+                )
             if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
                 return RouteDecision(
                     provider="exa",
@@ -1019,6 +1087,8 @@ class MySearchClient:
                     max_results=max_results,
                     categories=self._firecrawl_categories(mode, intent),
                     include_content=include_content or strategy == "deep",
+                    include_domains=include_domains,
+                    exclude_domains=exclude_domains,
                 ),
             }
         else:
@@ -1028,6 +1098,8 @@ class MySearchClient:
                     max_results=max_results,
                     categories=decision.firecrawl_categories or self._firecrawl_categories(mode, intent),
                     include_content=include_content or strategy == "deep",
+                    include_domains=include_domains,
+                    exclude_domains=exclude_domains,
                 ),
                 "secondary": lambda: self._search_tavily(
                     query=query,
@@ -1139,6 +1211,66 @@ class MySearchClient:
         max_results: int,
         categories: list[str],
         include_content: bool,
+        include_domains: list[str] | None,
+        exclude_domains: list[str] | None,
+    ) -> dict[str, Any]:
+        include_domains = [item.strip() for item in (include_domains or []) if item and item.strip()]
+        exclude_domains = [item.strip() for item in (exclude_domains or []) if item and item.strip()]
+
+        if include_domains:
+            per_domain_results = []
+            citations = []
+            seen_urls: set[str] = set()
+            for domain in include_domains:
+                domain_result = self._search_firecrawl_once(
+                    query=self._build_firecrawl_domain_query(
+                        query=query,
+                        include_domain=domain,
+                        exclude_domains=exclude_domains,
+                    ),
+                    max_results=max_results,
+                    categories=categories,
+                    include_content=include_content,
+                )
+                per_domain_results.append(domain_result)
+                for item in domain_result.get("results", []):
+                    url = item.get("url", "")
+                    if not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    citations.append({"title": item.get("title", ""), "url": url})
+
+            merged_results = self._merge_ranked_results(
+                [result.get("results", []) for result in per_domain_results],
+                max_results=max_results,
+            )
+            return {
+                "provider": "firecrawl",
+                "transport": per_domain_results[0].get("transport", "env") if per_domain_results else "env",
+                "query": query,
+                "answer": "",
+                "results": merged_results,
+                "citations": citations[:max_results],
+            }
+
+        return self._search_firecrawl_once(
+            query=self._build_firecrawl_domain_query(
+                query=query,
+                include_domain=None,
+                exclude_domains=exclude_domains,
+            ),
+            max_results=max_results,
+            categories=categories,
+            include_content=include_content,
+        )
+
+    def _search_firecrawl_once(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        categories: list[str],
+        include_content: bool,
     ) -> dict[str, Any]:
         provider = self.config.firecrawl
         key = self._get_key_or_raise(provider)
@@ -1188,6 +1320,53 @@ class MySearchClient:
                 if item.get("url")
             ],
         }
+
+    def _build_firecrawl_domain_query(
+        self,
+        *,
+        query: str,
+        include_domain: str | None,
+        exclude_domains: list[str] | None,
+    ) -> str:
+        parts: list[str] = []
+        if include_domain:
+            parts.append(f"site:{include_domain}")
+        for domain in exclude_domains or []:
+            parts.append(f"-site:{domain}")
+        parts.append(query)
+        return " ".join(parts).strip()
+
+    def _merge_ranked_results(
+        self,
+        result_lists: list[list[dict[str, Any]]],
+        *,
+        max_results: int,
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+        indexes = [0 for _ in result_lists]
+
+        while len(merged) < max_results and result_lists:
+            progressed = False
+            for list_index, items in enumerate(result_lists):
+                current_index = indexes[list_index]
+                if current_index >= len(items):
+                    continue
+                candidate = dict(items[current_index])
+                indexes[list_index] += 1
+                progressed = True
+                url = candidate.get("url", "")
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                merged.append(candidate)
+                if len(merged) >= max_results:
+                    break
+            if not progressed:
+                break
+
+        return merged
 
     def _search_exa(
         self,
