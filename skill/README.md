@@ -77,13 +77,18 @@ bash skill/scripts/install_codex_skill.sh --force
 python3 -m venv venv
 ```
 
-如果配置文件还没准备：
+优先把配置直接写进宿主 config：
+
+- `Codex`：`~/.codex/config.toml` 的 `mcp_servers.mysearch.env`
+- `Claude Code`：注册 MCP 时把 `MYSEARCH_*` 注入 env
+
+只有在本地单仓调试、又不方便改宿主配置时，才准备：
 
 ```bash
 cp mysearch/.env.example mysearch/.env
 ```
 
-再根据用户环境填写：
+再按需填写：
 
 - `MYSEARCH_TAVILY_*`
 - `MYSEARCH_FIRECRAWL_*`

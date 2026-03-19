@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -32,10 +33,40 @@ def _load_env_file(env_path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
+def _load_mapping_env(raw_env: dict[str, object]) -> None:
+    for key, value in raw_env.items():
+        if not isinstance(value, str):
+            continue
+        cleaned = value.strip()
+        if not cleaned:
+            continue
+        os.environ.setdefault(key, cleaned)
+
+
+def _load_codex_mcp_env() -> None:
+    config_path = Path(os.getenv("CODEX_HOME", "~/.codex")).expanduser() / "config.toml"
+    if not config_path.exists():
+        return
+
+    try:
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    env = ((data.get("mcp_servers") or {}).get("mysearch") or {}).get("env") or {}
+    if isinstance(env, dict):
+        _load_mapping_env(env)
+
+
 def _load_dotenv() -> None:
-    # 优先读取 mysearch/.env，使 MySearch 在当前单仓目录下也能独立运行。
+    # .env 只作为本地单仓调试兜底，不覆盖宿主已注入的配置。
     for env_path in (MODULE_DIR / ".env", ROOT_DIR / ".env"):
         _load_env_file(env_path)
+
+
+def _bootstrap_runtime_env() -> None:
+    _load_codex_mcp_env()
+    _load_dotenv()
 
 
 def _get_str(*names: str, default: str = "") -> str:
@@ -125,7 +156,7 @@ def _provider_path(
     return _normalize_path(default)
 
 
-_load_dotenv()
+_bootstrap_runtime_env()
 
 
 @dataclass(slots=True)

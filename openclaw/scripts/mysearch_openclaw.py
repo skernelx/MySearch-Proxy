@@ -30,6 +30,38 @@ def _load_env_file(path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
+def _load_mapping_env(raw_env: dict[str, object]) -> None:
+    for key, value in raw_env.items():
+        if not isinstance(value, str):
+            continue
+        cleaned = value.strip()
+        if not cleaned:
+            continue
+        os.environ.setdefault(key, cleaned)
+
+
+def _load_openclaw_skill_env(base_dir: Path) -> None:
+    candidates: list[Path] = []
+    explicit = os.getenv("OPENCLAW_CONFIG_PATH", "").strip()
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+    candidates.append(base_dir.parents[1] / "openclaw.json")
+
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen or not path.exists():
+            continue
+        seen.add(path)
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        env = (((config.get("skills") or {}).get("entries") or {}).get("mysearch") or {}).get("env") or {}
+        if isinstance(env, dict):
+            _load_mapping_env(env)
+            return
+
+
 def _bootstrap_error(message: str) -> int:
     print(message, file=sys.stderr)
     print(
@@ -266,6 +298,7 @@ def _render_research(payload: dict[str, Any]) -> str:
 
 
 def main() -> int:
+    _load_openclaw_skill_env(BASE_DIR)
     _load_env_file(BASE_DIR / ".env")
     _load_env_file(BASE_DIR / "runtime" / ".env")
 

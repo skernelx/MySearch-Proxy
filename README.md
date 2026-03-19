@@ -84,9 +84,15 @@ MySearch MCP / Codex Skill / OpenClaw Skill
 如果你暂时还没有 Proxy，也可以让 `mysearch/` 或 `openclaw/` 直接连官方
 provider。
 
-## 最新优化（v0.1.7）
+## 最新优化（v0.1.8）
 
-这次版本重点是修正文档类 `balanced` 混合检索的排序偏差，避免官方文档被第三方页面抢掉前排，同时保留已有的稳定性与 Social / X fallback 优化。
+这次版本重点是把配置入口收成 `config-first`，不再把 `.env` 当默认主入口；同时保留上一版修好的 docs 排序与 Social / X fallback。
+
+- 配置入口收口：
+  - `MySearch` runtime 现在会优先读取 `~/.codex/config.toml` 的 `mcp_servers.mysearch.env`。
+  - `install.sh` 会先继承宿主已注册的 `MYSEARCH_*`，再用 `mysearch/.env` 只补缺省值。
+  - OpenClaw wrapper 现在会优先读取 `openclaw.json` 的 `skills.entries.mysearch.env`。
+  - `.env` 继续支持，但明确只保留给本地单仓调试兜底，不再是推荐主路径。
 
 - 文档 / 资源类结果重排：
   - `docs / github / pdf / resource / tutorial` 的 blended 结果现在会优先官方域名和官方文档路径。
@@ -118,7 +124,7 @@ provider。
 - 健康检查增强：
   - `mysearch_health` / `health` 现在会返回 `runtime`、`routing_defaults`、`cache`。
 - OpenClaw 同步：
-  - `openclaw` bundle 将随本次发布同步到 `mysearch@0.1.7`。
+  - `openclaw` bundle 将随本次发布同步到 `mysearch@0.1.8`。
 
 新增运行时参数：
 
@@ -153,10 +159,15 @@ MYSEARCH_EXTRACT_CACHE_TTL_SECONDS=300
 ```bash
 cd /path/to/MySearch-Proxy
 python3 -m venv venv
-cp mysearch/.env.example mysearch/.env
 ```
 
-推荐填法：
+优先把配置直接放进宿主 config：
+
+- `Codex`：`~/.codex/config.toml` 的 `mcp_servers.mysearch.env`
+- `OpenClaw`：`openclaw.json` 的 `skills.entries.mysearch.env`
+- `.env`：只建议本地单仓调试时作为兜底
+
+推荐最小配置：
 
 ```env
 MYSEARCH_PROXY_BASE_URL=https://your-mysearch-proxy.example.com
@@ -168,6 +179,8 @@ MYSEARCH_PROXY_API_KEY=mysp-...
 ```bash
 ./install.sh
 ```
+
+`install.sh` 现在会优先继承宿主已有配置，再用 `mysearch/.env` 只补缺省值。
 
 验收：
 

@@ -220,13 +220,18 @@ python3 -m venv venv
 ./install.sh
 ```
 
-如果只是补配置，先准备：
+优先把 `MYSEARCH_*` 直接写进宿主 config：
+
+- `Codex`：`~/.codex/config.toml` 的 `mcp_servers.mysearch.env`
+- `Claude Code`：注册 MCP 时直接注入 env
+
+只有在本地单仓调试、又不方便改宿主配置时，才准备：
 
 ```bash
 cp mysearch/.env.example mysearch/.env
 ```
 
-再填写 `MYSEARCH_*` / `SOCIAL_GATEWAY_*`。
+再填写缺的 `MYSEARCH_*` / `SOCIAL_GATEWAY_*`。
 
 ## 快速验收
 

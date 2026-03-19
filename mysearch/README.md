@@ -104,8 +104,13 @@ MYSEARCH_XAI_API_KEY=xai-...
 
 ```bash
 python3 -m venv venv
-cp mysearch/.env.example mysearch/.env
 ```
+
+优先把配置放进宿主 config，而不是先复制 `.env`：
+
+- `Codex`：`~/.codex/config.toml` 的 `mcp_servers.mysearch.env`
+- `Claude Code`：注册 MCP 时直接把 `MYSEARCH_*` 注入 env
+- `mysearch/.env`：只建议本地单仓调试时使用
 
 填好配置后安装：
 
@@ -117,6 +122,7 @@ cp mysearch/.env.example mysearch/.env
 
 - 安装 `mysearch/requirements.txt`
 - 如果本机有 `codex` 或 `claude` 命令，就自动注册 `mysearch` MCP
+- 如果宿主已有 `mysearch` config，会直接复用其中的 `MYSEARCH_*`
 
 ## 推荐验收
 

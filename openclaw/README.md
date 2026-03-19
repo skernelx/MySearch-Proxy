@@ -62,6 +62,9 @@ MYSEARCH_XAI_API_KEY=xai-...
 
 安装后重点不是改 bundle 文件，而是给 OpenClaw skill config 注入 env。
 
+`mysearch_openclaw.py` 现在会优先读取 OpenClaw 的 `openclaw.json` 里
+`skills.entries.mysearch.env`，所以正式部署不需要把 key 再复制进 skill 目录。
+
 推荐做法：
 
 - 在 OpenClaw 的 skill 配置里填 `MYSEARCH_PROXY_BASE_URL`
@@ -169,9 +172,14 @@ OpenClaw 版 MySearch 本质上还是同一套能力，只是打成了 skill bun
 - `social`
   - 走 xAI 或兼容 `/social/search`
 
-## 版本与优化说明（v0.1.7）
+## 版本与优化说明（v0.1.8）
 
-`mysearch@0.1.7` 已同步以下运行时优化：
+`mysearch@0.1.8` 已同步以下运行时优化：
+
+- 配置入口收口：
+  - runtime 现在会优先读取宿主配置里的 skill env，不再默认把 `.env` 当主入口。
+  - `mysearch_openclaw.py` 会优先读取 `openclaw.json` 中 `skills.entries.mysearch.env`。
+  - `.env` 仍可用，但只建议本地 bundle 调试时使用。
 
 - 文档结果质量：
   - `docs / github / pdf / resource / tutorial` 的混合结果现在会优先官方文档域名与文档路径。

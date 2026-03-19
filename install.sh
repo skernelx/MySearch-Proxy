@@ -4,13 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_PY="$ROOT_DIR/venv/bin/python"
 
-if [[ -f "$ROOT_DIR/mysearch/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$ROOT_DIR/mysearch/.env"
-  set +a
-fi
-
 if [[ -x "$VENV_PY" ]]; then
   PYTHON_BIN="$VENV_PY"
 else
@@ -104,7 +97,35 @@ PY
   )
 }
 
+load_env_file_defaults() {
+  local env_path="${1:?missing env path}"
+  [[ -f "$env_path" ]] || return 0
+
+  while IFS='=' read -r key value; do
+    if [[ -z "${!key-}" ]]; then
+      export "$key=$value"
+    fi
+  done < <(
+    "$PYTHON_BIN" - <<'PY' "$env_path"
+from pathlib import Path
+import sys
+
+for raw_line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    key = key.strip()
+    value = value.strip()
+    if value[:1] == value[-1:] and value[:1] in {"'", '"'}:
+        value = value[1:-1]
+    print(f"{key}={value}")
+PY
+  )
+}
+
 load_existing_codex_mysearch_env
+load_env_file_defaults "$ROOT_DIR/mysearch/.env"
 
 CLAUDE_ENV_ARGS=(-e "PYTHONPATH=$ROOT_DIR")
 CODEX_ENV_ARGS=(--env "PYTHONPATH=$ROOT_DIR")
