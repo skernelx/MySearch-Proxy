@@ -141,6 +141,28 @@ MYSEARCH_PROXY_API_KEY = "config-token"
         finally:
             self._restore_env(snapshot)
 
+    def test_config_parser_falls_back_without_tomllib(self) -> None:
+        module = _load_module(
+            "test_mysearch_config_parser_fallback",
+            REPO_ROOT / "mysearch" / "config.py",
+        )
+        module.tomllib = None
+        env = module._parse_codex_mysearch_env(
+            """
+[mcp_servers.mysearch.env]
+MYSEARCH_PROXY_BASE_URL = "https://fallback.example.com"
+MYSEARCH_PROXY_API_KEY = "fallback-token"
+""".strip()
+        )
+
+        self.assertEqual(
+            env,
+            {
+                "MYSEARCH_PROXY_BASE_URL": "https://fallback.example.com",
+                "MYSEARCH_PROXY_API_KEY": "fallback-token",
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

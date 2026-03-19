@@ -83,15 +83,46 @@ load_existing_codex_mysearch_env() {
     "$PYTHON_BIN" - <<'PY' "$config_path" "${ENV_KEYS[@]}"
 from pathlib import Path
 import sys
-import tomllib
 
 config_path = Path(sys.argv[1])
-keys = sys.argv[2:]
-data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-env = ((data.get("mcp_servers") or {}).get("mysearch") or {}).get("env") or {}
-for key in keys:
-    value = env.get(key)
-    if isinstance(value, str) and value.strip():
+keys = set(sys.argv[2:])
+config_text = config_path.read_text(encoding="utf-8")
+
+try:
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:
+    tomllib = None  # type: ignore[assignment]
+
+env = {}
+if tomllib is not None:
+    try:
+        data = tomllib.loads(config_text)
+        env = ((data.get("mcp_servers") or {}).get("mysearch") or {}).get("env") or {}
+    except Exception:
+        env = {}
+
+if not isinstance(env, dict) or not env:
+    env = {}
+    in_section = False
+    for raw_line in config_text.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_section = line == "[mcp_servers.mysearch.env]"
+            continue
+        if not in_section or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if value[:1] == value[-1:] and value[:1] in {"'", '"'}:
+            value = value[1:-1]
+        if key and value:
+            env[key] = value
+
+for key, value in env.items():
+    if key in keys and isinstance(value, str) and value.strip():
         print(f"{key}={value}")
 PY
   )

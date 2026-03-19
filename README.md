@@ -84,15 +84,16 @@ MySearch MCP / Codex Skill / OpenClaw Skill
 如果你暂时还没有 Proxy，也可以让 `mysearch/` 或 `openclaw/` 直接连官方
 provider。
 
-## 最新优化（v0.1.8）
+## 最新优化（v0.1.9）
 
-这次版本重点是把配置入口收成 `config-first`，不再把 `.env` 当默认主入口；同时保留上一版修好的 docs 排序与 Social / X fallback。
+这次版本重点是把配置入口收成 `config-first`，同时补上 Python 3.10 兼容，避免 OpenClaw skill 在旧 Python 上因为 `tomllib` 缺失直接导入失败；上一版 docs 排序与 Social / X fallback 继续保留。
 
 - 配置入口收口：
   - `MySearch` runtime 现在会优先读取 `~/.codex/config.toml` 的 `mcp_servers.mysearch.env`。
   - `install.sh` 会先继承宿主已注册的 `MYSEARCH_*`，再用 `mysearch/.env` 只补缺省值。
   - OpenClaw wrapper 现在会优先读取 `openclaw.json` 的 `skills.entries.mysearch.env`。
   - `.env` 继续支持，但明确只保留给本地单仓调试兜底，不再是推荐主路径。
+  - 读取宿主 config 时不再强依赖 Python 3.11 的 `tomllib`，对 Python 3.10 会自动回退到轻量解析。
 
 - 文档 / 资源类结果重排：
   - `docs / github / pdf / resource / tutorial` 的 blended 结果现在会优先官方域名和官方文档路径。
@@ -124,7 +125,7 @@ provider。
 - 健康检查增强：
   - `mysearch_health` / `health` 现在会返回 `runtime`、`routing_defaults`、`cache`。
 - OpenClaw 同步：
-  - `openclaw` bundle 将随本次发布同步到 `mysearch@0.1.8`。
+  - `openclaw` bundle 将随本次发布同步到 `mysearch@0.1.9`。
 
 新增运行时参数：
 

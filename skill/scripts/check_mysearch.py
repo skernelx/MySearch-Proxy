@@ -7,8 +7,12 @@ import argparse
 import json
 import os
 import sys
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:  # pragma: no cover - py310 fallback
+    tomllib = None  # type: ignore[assignment]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -16,6 +20,41 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from mysearch.clients import MySearchClient  # noqa: E402
+
+
+def parse_codex_mysearch_env(config_text: str) -> dict[str, str]:
+    if tomllib is not None:
+        try:
+            data = tomllib.loads(config_text)
+            env = ((data.get("mcp_servers") or {}).get("mysearch") or {}).get("env") or {}
+            if isinstance(env, dict):
+                return {
+                    key: value.strip()
+                    for key, value in env.items()
+                    if isinstance(value, str) and value.strip()
+                }
+        except Exception:
+            pass
+
+    env: dict[str, str] = {}
+    in_section = False
+    for raw_line in config_text.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_section = line == "[mcp_servers.mysearch.env]"
+            continue
+        if not in_section or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if value[:1] == value[-1:] and value[:1] in {"'", '"'}:
+            value = value[1:-1]
+        if key and value:
+            env[key] = value
+    return env
 
 
 def load_codex_mcp_env() -> None:
@@ -28,11 +67,9 @@ def load_codex_mcp_env() -> None:
     if not config_path.exists():
         return
 
-    data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    env = ((data.get("mcp_servers") or {}).get("mysearch") or {}).get("env") or {}
+    env = parse_codex_mysearch_env(config_path.read_text(encoding="utf-8"))
     for key, value in env.items():
-        if isinstance(value, str) and value.strip():
-            os.environ.setdefault(key, value)
+        os.environ.setdefault(key, value)
 
 
 def print_json(title: str, payload: dict) -> None:

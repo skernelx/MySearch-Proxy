@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
+
+try:
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:  # pragma: no cover - py310 fallback
+    tomllib = None  # type: ignore[assignment]
 
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -43,19 +47,52 @@ def _load_mapping_env(raw_env: dict[str, object]) -> None:
         os.environ.setdefault(key, cleaned)
 
 
+def _parse_codex_mysearch_env(config_text: str) -> dict[str, str]:
+    if tomllib is not None:
+        try:
+            data = tomllib.loads(config_text)
+            env = ((data.get("mcp_servers") or {}).get("mysearch") or {}).get("env") or {}
+            if isinstance(env, dict):
+                return {
+                    key: value.strip()
+                    for key, value in env.items()
+                    if isinstance(value, str) and value.strip()
+                }
+        except Exception:
+            pass
+
+    env: dict[str, str] = {}
+    in_section = False
+    for raw_line in config_text.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_section = line == "[mcp_servers.mysearch.env]"
+            continue
+        if not in_section or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if value[:1] == value[-1:] and value[:1] in {"'", '"'}:
+            value = value[1:-1]
+        if key and value:
+            env[key] = value
+    return env
+
+
 def _load_codex_mcp_env() -> None:
     config_path = Path(os.getenv("CODEX_HOME", "~/.codex")).expanduser() / "config.toml"
     if not config_path.exists():
         return
 
     try:
-        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        env = _parse_codex_mysearch_env(config_path.read_text(encoding="utf-8"))
     except Exception:
         return
 
-    env = ((data.get("mcp_servers") or {}).get("mysearch") or {}).get("env") or {}
-    if isinstance(env, dict):
-        _load_mapping_env(env)
+    _load_mapping_env(env)
 
 
 def _load_dotenv() -> None:
