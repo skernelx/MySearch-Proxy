@@ -172,9 +172,9 @@ OpenClaw 版 MySearch 本质上还是同一套能力，只是打成了 skill bun
 - `social`
   - 走 xAI 或兼容 `/social/search`
 
-## 版本与优化说明（v0.1.10）
+## 版本与优化说明（v0.1.11）
 
-`mysearch@0.1.10` 已同步以下运行时优化：
+`mysearch@0.1.11` 已同步以下运行时优化：
 
 - 配置入口收口：
   - runtime 现在会优先读取宿主配置里的 skill env，不再默认把 `.env` 当主入口。
@@ -188,6 +188,11 @@ OpenClaw 版 MySearch 本质上还是同一套能力，只是打成了 skill bun
   - `reddit / arxiv / researchgate / medium / youtube` 这类第三方页面会被后置，不再轻易抢前排。
   - `citations` 会跟随重排后的结果顺序，避免正文结果和引用顺序打架。
   - Firecrawl 若在 `site:` 域名约束查询下回空，会自动补一轮无 `site:` 的 Firecrawl 检索并在本地按域名过滤，减少 docs 查询被迫切到 Tavily 的概率。
+
+- Provider 健康与容错：
+  - `health` 现在会直接显示 provider 的 `live_status` 与 `live_error`，不再只报 `available_keys`。
+  - 若某个 provider 已配置但 key 实际失效，例如 `Tavily 401 deactivated`，wrapper 会明确显示 `auth_error`。
+  - docs / resource 路由和 Firecrawl 域名 fallback 会自动跳过处于 `auth_error` 的 Tavily，避免把“key 已失效”误判成“没配 provider”。
 
 - 路由稳定性：
   - 显式指定 provider 时，不再被 balanced 策略自动混成 hybrid。

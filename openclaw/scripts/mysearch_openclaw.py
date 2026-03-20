@@ -173,8 +173,11 @@ def _render_health(payload: dict[str, Any]) -> str:
                 f"- auth_mode: `{info.get('auth_mode', '')}`",
                 f"- search_mode: `{info.get('search_mode', '')}`",
                 f"- available_keys: `{info.get('available_keys', 0)}`",
+                f"- live_status: `{info.get('live_status', '')}`",
             ]
         )
+        if info.get("live_error"):
+            lines.append(f"- live_error: {info['live_error']}")
         alternate = info.get("alternate_base_urls") or {}
         for key, value in alternate.items():
             if value:

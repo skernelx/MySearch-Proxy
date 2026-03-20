@@ -48,6 +48,50 @@ class MySearchError(RuntimeError):
     """MySearch 调用失败。"""
 
 
+class MySearchHTTPError(MySearchError):
+    """携带 provider 与状态码的 HTTP 错误。"""
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        status_code: int,
+        detail: Any,
+        url: str,
+    ) -> None:
+        self.provider = provider
+        self.status_code = status_code
+        self.detail = detail
+        self.url = url
+        super().__init__(self._build_message())
+
+    @property
+    def is_auth_error(self) -> bool:
+        return self.status_code in {401, 403}
+
+    def _build_message(self) -> str:
+        detail_text = _stringify_error_detail(self.detail)
+        if self.is_auth_error:
+            return (
+                f"{self.provider} is configured but the API key was rejected "
+                f"(HTTP {self.status_code}): {detail_text or 'authentication failed'}"
+            )
+        return (
+            f"{self.provider} request failed "
+            f"(HTTP {self.status_code}): {detail_text or 'unknown error'}"
+        )
+
+
+def _stringify_error_detail(detail: Any) -> str:
+    if isinstance(detail, str):
+        return detail.strip()
+    if detail is None:
+        return ""
+    if isinstance(detail, (dict, list)):
+        return json.dumps(detail, ensure_ascii=False)
+    return str(detail).strip()
+
+
 @dataclass(slots=True)
 class RouteDecision:
     provider: str
@@ -78,10 +122,21 @@ class MySearchClient:
             "search": {"hits": 0, "misses": 0},
             "extract": {"hits": 0, "misses": 0},
         }
+        self._provider_probe_ttl_seconds = 300
+        self._provider_probe_cache: dict[str, dict[str, Any]] = {}
 
     def health(self) -> dict[str, Any]:
         keyring_info = self.keyring.describe()
         cache = self._cache_health()
+        providers = {
+            "tavily": self._describe_provider(self.config.tavily, keyring_info["tavily"]),
+            "firecrawl": self._describe_provider(
+                self.config.firecrawl,
+                keyring_info["firecrawl"],
+            ),
+            "exa": self._describe_provider(self.config.exa, keyring_info["exa"]),
+            "xai": self._describe_provider(self.config.xai, keyring_info["xai"]),
+        }
         return {
             "server_name": self.config.server_name,
             "timeout_seconds": self.config.timeout_seconds,
@@ -113,15 +168,7 @@ class MySearchClient:
                 "social": "xai",
                 "fallback": "exa",
             },
-            "providers": {
-                "tavily": self._describe_provider(self.config.tavily, keyring_info["tavily"]),
-                "firecrawl": self._describe_provider(
-                    self.config.firecrawl,
-                    keyring_info["firecrawl"],
-                ),
-                "exa": self._describe_provider(self.config.exa, keyring_info["exa"]),
-                "xai": self._describe_provider(self.config.xai, keyring_info["xai"]),
-            },
+            "providers": providers,
             "cache": cache,
         }
 
@@ -594,6 +641,12 @@ class MySearchClient:
                 route_reason = f"{route_reason}；{transition} fallback"
             if fallback_reason:
                 route_reason = f"{route_reason}（{fallback_reason}）"
+        secondary_error = str(result.get("secondary_error", "")).strip()
+        if secondary_error:
+            route_reason = (
+                f"{route_reason}；secondary provider issue: "
+                f"{self._summarize_route_error(secondary_error)}"
+            )
 
         route_selected = result.pop("route_selected", result.get("provider", decision.provider))
         result["intent"] = resolved_intent
@@ -969,7 +1022,9 @@ class MySearchClient:
 
         if mode in {"docs", "github", "pdf"}:
             if include_content:
-                if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+                if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
+                    self.config.exa
+                ):
                     return RouteDecision(
                         provider="exa",
                         reason="Firecrawl 未配置，文档正文查询回退到 Exa",
@@ -979,13 +1034,15 @@ class MySearchClient:
                     reason="文档正文查询优先走 Firecrawl",
                     firecrawl_categories=self._firecrawl_categories(mode, intent),
                 )
-            if self.keyring.has_provider("tavily"):
+            if self._provider_can_serve(self.config.tavily):
                 return RouteDecision(
                     provider="tavily",
                     reason="文档类查询先用 Tavily 做官方页面发现，正文再交给 Firecrawl",
                     tavily_topic="general",
                 )
-            if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+            if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
+                self.config.exa
+            ):
                 return RouteDecision(
                     provider="exa",
                     reason="Firecrawl 未配置，文档类查询回退到 Exa",
@@ -997,7 +1054,9 @@ class MySearchClient:
             )
 
         if include_content:
-            if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+            if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
+                self.config.exa
+            ):
                 return RouteDecision(
                     provider="exa",
                     reason="Firecrawl 未配置，正文查询回退到 Exa",
@@ -1009,7 +1068,9 @@ class MySearchClient:
             )
 
         if intent in {"news", "status"} or mode == "news" or self._looks_like_news_query(query_lower):
-            if not self.keyring.has_provider("tavily") and self.keyring.has_provider("exa"):
+            if not self._provider_can_serve(self.config.tavily) and self._provider_can_serve(
+                self.config.exa
+            ):
                 return RouteDecision(
                     provider="exa",
                     reason="Tavily 未配置，新闻 / 状态类查询回退到 Exa",
@@ -1022,7 +1083,9 @@ class MySearchClient:
 
         if intent == "resource" or self._looks_like_docs_query(query_lower):
             if include_content:
-                if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+                if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
+                    self.config.exa
+                ):
                     return RouteDecision(
                         provider="exa",
                         reason="Firecrawl 未配置，resource 正文查询回退到 Exa",
@@ -1032,13 +1095,15 @@ class MySearchClient:
                     reason="resource / docs 正文查询优先走 Firecrawl",
                     firecrawl_categories=self._firecrawl_categories("docs", intent),
                 )
-            if self.keyring.has_provider("tavily"):
+            if self._provider_can_serve(self.config.tavily):
                 return RouteDecision(
                     provider="tavily",
                     reason="resource / docs 查询先用 Tavily 做页面发现，正文再交给 Firecrawl",
                     tavily_topic="general",
                 )
-            if not self.keyring.has_provider("firecrawl") and self.keyring.has_provider("exa"):
+            if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
+                self.config.exa
+            ):
                 return RouteDecision(
                     provider="exa",
                     reason="Firecrawl 未配置，resource / docs 类查询回退到 Exa",
@@ -1050,7 +1115,9 @@ class MySearchClient:
             )
 
         if mode == "research":
-            if not self.keyring.has_provider("tavily") and self.keyring.has_provider("exa"):
+            if not self._provider_can_serve(self.config.tavily) and self._provider_can_serve(
+                self.config.exa
+            ):
                 return RouteDecision(
                     provider="exa",
                     reason="Tavily 未配置，research 发现阶段回退到 Exa",
@@ -1061,7 +1128,9 @@ class MySearchClient:
                 tavily_topic="general",
             )
 
-        if not self.keyring.has_provider("tavily") and self.keyring.has_provider("exa"):
+        if not self._provider_can_serve(self.config.tavily) and self._provider_can_serve(
+            self.config.exa
+        ):
             return RouteDecision(
                 provider="exa",
                 reason="Tavily 未配置，普通网页检索回退到 Exa",
@@ -1145,7 +1214,9 @@ class MySearchClient:
             return False
         if "x" in sources:
             return False
-        return self.keyring.has_provider("tavily") and self.keyring.has_provider("firecrawl")
+        return self._provider_can_serve(self.config.tavily) and self._provider_can_serve(
+            self.config.firecrawl
+        )
 
     def _search_web_blended(
         self,
@@ -1403,7 +1474,7 @@ class MySearchClient:
         include_domains: list[str],
         exclude_domains: list[str] | None,
     ) -> dict[str, Any] | None:
-        if not self.keyring.has_provider("tavily"):
+        if not self._provider_can_serve(self.config.tavily):
             return None
 
         fallback_result = self._search_tavily(
@@ -2648,6 +2719,7 @@ class MySearchClient:
         provider: ProviderConfig,
         keyring_info: dict[str, object],
     ) -> dict[str, Any]:
+        status = self._probe_provider_status(provider, int(keyring_info["count"]))
         return {
             "base_url": provider.base_url,
             "alternate_base_urls": provider.alternate_base_urls,
@@ -2657,6 +2729,9 @@ class MySearchClient:
             "keys_file": str(provider.keys_file or ""),
             "available_keys": keyring_info["count"],
             "sources": keyring_info["sources"],
+            "live_status": status["status"],
+            "live_error": status["error"],
+            "last_checked_at": status["checked_at"],
         }
 
     def _get_key_or_raise(self, provider: ProviderConfig):
@@ -2686,6 +2761,7 @@ class MySearchClient:
         payload: dict[str, Any],
         key: str,
         base_url: str | None = None,
+        timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         headers: dict[str, str] = {}
         body = dict(payload)
@@ -2710,7 +2786,7 @@ class MySearchClient:
         )
 
         try:
-            with urlopen(request, timeout=self.config.timeout_seconds) as response:
+            with urlopen(request, timeout=timeout_seconds or self.config.timeout_seconds) as response:
                 status_code = response.status
                 response_text = response.read().decode("utf-8", errors="replace")
         except HTTPError as exc:
@@ -2727,9 +2803,171 @@ class MySearchClient:
             raise MySearchError(f"non-json response from {url}: {response_text[:300]}") from exc
 
         if status_code >= 400:
-            detail = data.get("detail") if isinstance(data, dict) else data
-            raise MySearchError(f"HTTP {status_code}: {detail}")
+            detail = data
+            if isinstance(data, dict):
+                detail = (
+                    data.get("detail")
+                    or data.get("error")
+                    or data.get("message")
+                    or data
+                )
+            raise MySearchHTTPError(
+                provider=provider.name,
+                status_code=status_code,
+                detail=detail,
+                url=url,
+            )
         return data
+
+    def _probe_provider_status(
+        self,
+        provider: ProviderConfig,
+        key_count: int,
+    ) -> dict[str, str]:
+        if key_count <= 0:
+            return {
+                "status": "not_configured",
+                "error": "",
+                "checked_at": "",
+            }
+
+        record = self.keyring.first(provider.name)
+        if record is None:
+            return {
+                "status": "not_configured",
+                "error": "",
+                "checked_at": "",
+            }
+
+        cache_key = f"{provider.name}:{record.label}"
+        with self._cache_lock:
+            now = time.monotonic()
+            cached = self._provider_probe_cache.get(cache_key)
+            if cached and cached.get("expires_at", 0.0) > now:
+                return copy.deepcopy(cached["value"])
+
+        checked_at = datetime.now(timezone.utc).isoformat()
+        try:
+            self._probe_provider_request(provider, record.key)
+            result = {
+                "status": "ok",
+                "error": "",
+                "checked_at": checked_at,
+            }
+        except MySearchHTTPError as exc:
+            result = {
+                "status": "auth_error" if exc.is_auth_error else "http_error",
+                "error": str(exc),
+                "checked_at": checked_at,
+            }
+        except MySearchError as exc:
+            result = {
+                "status": "network_error",
+                "error": str(exc),
+                "checked_at": checked_at,
+            }
+
+        with self._cache_lock:
+            self._provider_probe_cache[cache_key] = {
+                "expires_at": time.monotonic() + self._provider_probe_ttl_seconds,
+                "value": copy.deepcopy(result),
+            }
+        return result
+
+    def _probe_provider_request(self, provider: ProviderConfig, key: str) -> None:
+        timeout_seconds = min(self.config.timeout_seconds, 10)
+        if provider.name == "tavily":
+            self._request_json(
+                provider=provider,
+                method="POST",
+                path=provider.path("search"),
+                payload={
+                    "query": "openai",
+                    "max_results": 1,
+                    "search_depth": "basic",
+                    "topic": "general",
+                    "include_answer": False,
+                    "include_raw_content": False,
+                },
+                key=key,
+                timeout_seconds=timeout_seconds,
+            )
+            return
+        if provider.name == "firecrawl":
+            self._request_json(
+                provider=provider,
+                method="POST",
+                path=provider.path("search"),
+                payload={
+                    "query": "openai",
+                    "limit": 1,
+                },
+                key=key,
+                timeout_seconds=timeout_seconds,
+            )
+            return
+        if provider.name == "exa":
+            self._request_json(
+                provider=provider,
+                method="POST",
+                path=provider.path("search"),
+                payload={
+                    "query": "openai",
+                    "numResults": 1,
+                },
+                key=key,
+                timeout_seconds=timeout_seconds,
+            )
+            return
+        if provider.name == "xai":
+            if provider.search_mode == "compatible":
+                self._request_json(
+                    provider=provider,
+                    method="POST",
+                    path=provider.path("social_search"),
+                    payload={
+                        "query": "openai",
+                        "source": "x",
+                        "max_results": 1,
+                    },
+                    key=key,
+                    base_url=provider.base_url_for("social_search"),
+                    timeout_seconds=timeout_seconds,
+                )
+                return
+            self._request_json(
+                provider=provider,
+                method="POST",
+                path=provider.path("responses"),
+                payload=self._build_xai_responses_payload(
+                    query="openai",
+                    sources=["x"],
+                    max_results=1,
+                    include_domains=None,
+                    exclude_domains=None,
+                    allowed_x_handles=None,
+                    excluded_x_handles=None,
+                    from_date=None,
+                    to_date=None,
+                    include_x_images=False,
+                    include_x_videos=False,
+                ),
+                key=key,
+                timeout_seconds=timeout_seconds,
+            )
+            return
+
+    def _summarize_route_error(self, error_text: str) -> str:
+        compact = " ".join(error_text.split())
+        if len(compact) <= 220:
+            return compact
+        return f"{compact[:217]}..."
+
+    def _provider_can_serve(self, provider: ProviderConfig) -> bool:
+        if not self.keyring.has_provider(provider.name):
+            return False
+        status = self._probe_provider_status(provider, 1)
+        return status["status"] != "auth_error"
 
     def _extract_xai_output_text(self, payload: dict[str, Any]) -> str:
         if isinstance(payload.get("output_text"), str):

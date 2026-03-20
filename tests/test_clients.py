@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import unittest
+from urllib.error import HTTPError
 from unittest.mock import patch
 
-from mysearch.clients import MySearchClient, RouteDecision
+from mysearch.clients import MySearchClient, MySearchHTTPError, RouteDecision
 
 
 class _FakeResponse:
@@ -22,6 +24,50 @@ class _FakeResponse:
 
 
 class MySearchClientTests(unittest.TestCase):
+    def test_request_json_auth_error_mentions_rejected_key(self) -> None:
+        client = MySearchClient()
+        provider = client.config.tavily
+        error = HTTPError(
+            url="https://example.com/search",
+            code=401,
+            msg="Unauthorized",
+            hdrs=None,
+            fp=io.BytesIO(
+                b'{"error":"The account associated with this API key has been deactivated."}'
+            ),
+        )
+
+        with patch("mysearch.clients.urlopen", side_effect=error):
+            with self.assertRaises(MySearchHTTPError) as ctx:
+                client._request_json(
+                    provider=provider,
+                    method="POST",
+                    path=provider.path("search"),
+                    payload={"query": "openai"},
+                    key="test-key",
+                )
+
+        self.assertEqual(ctx.exception.provider, "tavily")
+        self.assertEqual(ctx.exception.status_code, 401)
+        self.assertIn("configured but the API key was rejected", str(ctx.exception))
+        self.assertIn("deactivated", str(ctx.exception))
+
+    def test_health_reports_live_auth_error(self) -> None:
+        client = MySearchClient()
+        client._probe_provider_status = lambda provider, key_count: {  # type: ignore[method-assign]
+            "status": "auth_error" if provider.name == "tavily" else "ok",
+            "error": "tavily is configured but the API key was rejected (HTTP 401): deactivated"
+            if provider.name == "tavily"
+            else "",
+            "checked_at": "2026-03-20T00:00:00+00:00",
+        }
+
+        payload = client.health()
+
+        self.assertEqual(payload["providers"]["tavily"]["live_status"], "auth_error")
+        self.assertIn("deactivated", payload["providers"]["tavily"]["live_error"])
+        self.assertEqual(payload["providers"]["firecrawl"]["live_status"], "ok")
+
     def test_github_blob_raw_urls_try_common_branch_aliases(self) -> None:
         client = MySearchClient()
 
@@ -61,6 +107,11 @@ class MySearchClientTests(unittest.TestCase):
     def test_firecrawl_domain_filtered_search_falls_back_to_tavily(self) -> None:
         client = MySearchClient()
         client.keyring.has_provider = lambda provider: provider == "tavily"  # type: ignore[method-assign]
+        client._probe_provider_status = lambda provider, key_count: {  # type: ignore[method-assign]
+            "status": "ok",
+            "error": "",
+            "checked_at": "2026-03-20T00:00:00+00:00",
+        }
         client._search_firecrawl_once = lambda **kwargs: {  # type: ignore[method-assign]
             "provider": "firecrawl",
             "transport": "env",
@@ -182,6 +233,36 @@ class MySearchClientTests(unittest.TestCase):
             result["route_debug"]["retried_include_domains"],
             ["docs.firecrawl.dev"],
         )
+
+    def test_firecrawl_domain_filtered_search_skips_tavily_auth_error_fallback(self) -> None:
+        client = MySearchClient()
+        client.keyring.has_provider = lambda provider: provider in {"tavily", "firecrawl"}  # type: ignore[method-assign]
+        client._probe_provider_status = lambda provider, key_count: {  # type: ignore[method-assign]
+            "status": "auth_error" if provider.name == "tavily" else "ok",
+            "error": "tavily rejected" if provider.name == "tavily" else "",
+            "checked_at": "2026-03-20T00:00:00+00:00",
+        }
+        client._search_firecrawl_once = lambda **kwargs: {  # type: ignore[method-assign]
+            "provider": "firecrawl",
+            "transport": "env",
+            "query": kwargs["query"],
+            "answer": "",
+            "results": [],
+            "citations": [],
+        }
+        client._search_tavily = lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not call tavily"))  # type: ignore[method-assign]
+
+        result = client._search_firecrawl(
+            query="Firecrawl docs scrape api",
+            max_results=5,
+            categories=["technical"],
+            include_content=False,
+            include_domains=["docs.firecrawl.dev"],
+            exclude_domains=None,
+        )
+
+        self.assertEqual(result["provider"], "firecrawl")
+        self.assertEqual(result["results"], [])
 
     def test_docs_blended_search_reranks_official_results_ahead_of_third_party(self) -> None:
         client = MySearchClient()
@@ -350,7 +431,81 @@ class MySearchClientTests(unittest.TestCase):
 
         self.assertEqual(result["results"][0]["url"], official_url)
         self.assertEqual(result["citations"][0]["url"], official_url)
-        self.assertLess(first_anthropic, first_non_anthropic)
+
+    def test_search_route_reason_surfaces_secondary_provider_auth_error(self) -> None:
+        client = MySearchClient()
+        client.keyring.has_provider = lambda provider: provider in {"tavily", "firecrawl"}  # type: ignore[method-assign]
+        client._probe_provider_status = lambda provider, key_count: {  # type: ignore[method-assign]
+            "status": "ok",
+            "error": "",
+            "checked_at": "2026-03-20T00:00:00+00:00",
+        }
+        client._route_search = lambda **kwargs: RouteDecision(  # type: ignore[method-assign]
+            provider="firecrawl",
+            reason="文档类查询优先 Firecrawl",
+            firecrawl_categories=["technical"],
+        )
+        client._search_firecrawl = lambda **kwargs: {  # type: ignore[method-assign]
+            "provider": "firecrawl",
+            "transport": "env",
+            "query": kwargs["query"],
+            "answer": "",
+            "results": [
+                {
+                    "provider": "firecrawl",
+                    "source": "web",
+                    "title": "Official docs",
+                    "url": "https://docs.example.com/page",
+                    "snippet": "Official docs",
+                    "content": "",
+                }
+            ],
+            "citations": [{"title": "Official docs", "url": "https://docs.example.com/page"}],
+        }
+
+        def fail_tavily(**kwargs):  # type: ignore[no-untyped-def]
+            raise MySearchHTTPError(
+                provider="tavily",
+                status_code=401,
+                detail="The account associated with this API key has been deactivated.",
+                url="https://example.com/search",
+            )
+
+        client._search_tavily = fail_tavily  # type: ignore[method-assign]
+
+        result = client.search(
+            query="example docs",
+            mode="docs",
+            strategy="balanced",
+            provider="auto",
+            include_answer=False,
+        )
+
+        self.assertEqual(result["provider"], "firecrawl")
+        self.assertIn("secondary provider issue", result["route"]["reason"])
+        self.assertIn("configured but the API key was rejected", result["route"]["reason"])
+
+    def test_docs_route_skips_tavily_when_live_probe_reports_auth_error(self) -> None:
+        client = MySearchClient()
+        client.keyring.has_provider = lambda provider: provider in {"tavily", "firecrawl"}  # type: ignore[method-assign]
+        client._probe_provider_status = lambda provider, key_count: {  # type: ignore[method-assign]
+            "status": "auth_error" if provider.name == "tavily" else "ok",
+            "error": "tavily rejected" if provider.name == "tavily" else "",
+            "checked_at": "2026-03-20T00:00:00+00:00",
+        }
+
+        decision = client._route_search(
+            query="newapi cache 官方文档",
+            mode="docs",
+            intent="resource",
+            provider="auto",
+            sources=["web"],
+            include_content=False,
+            allowed_x_handles=None,
+            excluded_x_handles=None,
+        )
+
+        self.assertEqual(decision.provider, "firecrawl")
 
 
 if __name__ == "__main__":

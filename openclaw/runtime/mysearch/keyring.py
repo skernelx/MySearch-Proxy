@@ -57,6 +57,13 @@ class MySearchKeyRing:
         with self._lock:
             return bool(self._keys.get(provider))
 
+    def first(self, provider: str) -> KeyRecord | None:
+        with self._lock:
+            keys = self._keys.get(provider) or []
+            if not keys:
+                return None
+            return keys[0]
+
     def describe(self) -> dict[str, dict[str, object]]:
         with self._lock:
             result: dict[str, dict[str, object]] = {}
