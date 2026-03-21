@@ -67,6 +67,13 @@ MYSEARCH_PROXY_API_KEY=mysp-...
 
 如果你还没有 Proxy，也可以直接连 provider。
 
+现在 Tavily 也支持显式两种接法：
+
+- `MYSEARCH_TAVILY_MODE=official`
+  - 自己导入和轮询 Tavily 官方 key
+- `MYSEARCH_TAVILY_MODE=gateway`
+  - 用上游 gateway token 访问兼容网关，例如 `tavily-hikari`
+
 ## 直连 provider 的最小配置
 
 最小直连通常至少需要：
@@ -74,6 +81,23 @@ MYSEARCH_PROXY_API_KEY=mysp-...
 ```env
 MYSEARCH_TAVILY_API_KEY=tvly-...
 MYSEARCH_FIRECRAWL_API_KEY=fc-...
+```
+
+如果你要让 Tavily 走上游 gateway：
+
+```env
+MYSEARCH_TAVILY_MODE=gateway
+MYSEARCH_TAVILY_GATEWAY_BASE_URL=http://127.0.0.1:8787/api/tavily
+MYSEARCH_TAVILY_GATEWAY_TOKEN=th-xxxx-xxxxxxxxxxxx
+MYSEARCH_FIRECRAWL_API_KEY=fc-...
+```
+
+如果你明确不走上游 gateway，就保持：
+
+```env
+MYSEARCH_TAVILY_MODE=official
+MYSEARCH_TAVILY_API_KEYS=tvly-a,tvly-b
+MYSEARCH_TAVILY_KEYS_FILE=accounts.txt
 ```
 
 如果你也要接 Exa：

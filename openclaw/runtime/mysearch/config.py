@@ -16,6 +16,7 @@ except ModuleNotFoundError:  # pragma: no cover - py310 fallback
 MODULE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = MODULE_DIR.parent
 AuthMode = Literal["bearer", "body"]
+TavilyMode = Literal["official", "gateway"]
 XAISearchMode = Literal["official", "compatible"]
 MCPTransport = Literal["stdio", "sse", "streamable-http"]
 
@@ -196,6 +197,46 @@ def _provider_path(
     return _normalize_path(default)
 
 
+def _get_tavily_mode(proxy_base_url: str) -> TavilyMode:
+    explicit = _get_str("MYSEARCH_TAVILY_MODE")
+    if explicit:
+        return explicit  # type: ignore[return-value]
+    if _get_str(
+        "MYSEARCH_TAVILY_GATEWAY_BASE_URL",
+        "MYSEARCH_TAVILY_GATEWAY_TOKEN",
+        "MYSEARCH_TAVILY_GATEWAY_API_KEY",
+    ) or _get_list("MYSEARCH_TAVILY_GATEWAY_TOKENS", "MYSEARCH_TAVILY_GATEWAY_API_KEYS"):
+        return "gateway"
+    return "gateway" if proxy_base_url else "official"
+
+
+def _tavily_gateway_base_url(proxy_base_url: str, default: str) -> str:
+    explicit = _get_str("MYSEARCH_TAVILY_GATEWAY_BASE_URL")
+    if explicit:
+        return _normalize_base_url(explicit)
+    if proxy_base_url:
+        return _normalize_base_url(proxy_base_url)
+    return _normalize_base_url(default)
+
+
+def _tavily_gateway_path(
+    *,
+    explicit_name: str,
+    explicit_gateway_base_url: str,
+    proxy_base_url: str,
+    proxy_default: str,
+    default: str,
+) -> str:
+    explicit = _get_str(explicit_name)
+    if explicit:
+        return _normalize_path(explicit)
+    if explicit_gateway_base_url:
+        return _normalize_path(default)
+    if proxy_base_url:
+        return _normalize_path(proxy_default)
+    return _normalize_path(default)
+
+
 _bootstrap_runtime_env()
 
 
@@ -209,6 +250,7 @@ class ProviderConfig:
     auth_field: str
     default_paths: dict[str, str]
     alternate_base_urls: dict[str, str] = field(default_factory=dict)
+    provider_mode: str = ""
     search_mode: XAISearchMode = "official"
     api_keys: list[str] = field(default_factory=list)
     keys_file: Path | None = None
@@ -243,6 +285,12 @@ class MySearchConfig:
     def from_env(cls) -> "MySearchConfig":
         proxy_base_url = _get_str("MYSEARCH_PROXY_BASE_URL")
         proxy_api_key = _get_str("MYSEARCH_PROXY_API_KEY")
+        tavily_mode = _get_tavily_mode(proxy_base_url)
+        tavily_gateway_base_url = _get_str("MYSEARCH_TAVILY_GATEWAY_BASE_URL")
+        tavily_gateway_token = _get_str(
+            "MYSEARCH_TAVILY_GATEWAY_TOKEN",
+            "MYSEARCH_TAVILY_GATEWAY_API_KEY",
+        )
         return cls(
             server_name=_get_str("MYSEARCH_NAME", "MYSEARCH_SERVER_NAME", default="MySearch"),
             timeout_seconds=_get_int("MYSEARCH_TIMEOUT_SECONDS", 45),
@@ -263,44 +311,104 @@ class MySearchConfig:
             mcp_stateless_http=_get_bool("MYSEARCH_MCP_STATELESS_HTTP", False),
             tavily=ProviderConfig(
                 name="tavily",
-                base_url=_provider_base_url(
-                    explicit_names=("MYSEARCH_TAVILY_BASE_URL",),
-                    proxy_base_url=proxy_base_url,
-                    default="https://api.tavily.com",
+                base_url=(
+                    _tavily_gateway_base_url(
+                        proxy_base_url=proxy_base_url,
+                        default="https://api.tavily.com",
+                    )
+                    if tavily_mode == "gateway"
+                    else _provider_base_url(
+                        explicit_names=("MYSEARCH_TAVILY_BASE_URL",),
+                        proxy_base_url="",
+                        default="https://api.tavily.com",
+                    )
                 ),
-                auth_mode=_get_str(
-                    "MYSEARCH_TAVILY_AUTH_MODE",
-                    default="bearer" if proxy_base_url else "body",
+                auth_mode=(
+                    _get_str(
+                        "MYSEARCH_TAVILY_GATEWAY_AUTH_MODE",
+                        default="bearer",
+                    )
+                    if tavily_mode == "gateway"
+                    else _get_str("MYSEARCH_TAVILY_AUTH_MODE", default="body")
                 ),  # type: ignore[arg-type]
-                auth_header=_get_str("MYSEARCH_TAVILY_AUTH_HEADER", default="Authorization"),
-                auth_scheme=_get_str("MYSEARCH_TAVILY_AUTH_SCHEME", default="Bearer"),
-                auth_field=_get_str("MYSEARCH_TAVILY_AUTH_FIELD", default="api_key"),
+                auth_header=(
+                    _get_str("MYSEARCH_TAVILY_GATEWAY_AUTH_HEADER", default="Authorization")
+                    if tavily_mode == "gateway"
+                    else _get_str("MYSEARCH_TAVILY_AUTH_HEADER", default="Authorization")
+                ),
+                auth_scheme=(
+                    _get_str("MYSEARCH_TAVILY_GATEWAY_AUTH_SCHEME", default="Bearer")
+                    if tavily_mode == "gateway"
+                    else _get_str("MYSEARCH_TAVILY_AUTH_SCHEME", default="Bearer")
+                ),
+                auth_field=(
+                    _get_str("MYSEARCH_TAVILY_GATEWAY_AUTH_FIELD", default="api_key")
+                    if tavily_mode == "gateway"
+                    else _get_str("MYSEARCH_TAVILY_AUTH_FIELD", default="api_key")
+                ),
                 default_paths={
-                    "search": _provider_path(
-                        explicit_name="MYSEARCH_TAVILY_SEARCH_PATH",
-                        proxy_base_url=proxy_base_url,
-                        proxy_default="/api/search",
-                        default="/search",
+                    "search": (
+                        _tavily_gateway_path(
+                            explicit_name="MYSEARCH_TAVILY_GATEWAY_SEARCH_PATH",
+                            explicit_gateway_base_url=tavily_gateway_base_url,
+                            proxy_base_url=proxy_base_url,
+                            proxy_default="/api/search",
+                            default="/search",
+                        )
+                        if tavily_mode == "gateway"
+                        else _provider_path(
+                            explicit_name="MYSEARCH_TAVILY_SEARCH_PATH",
+                            proxy_base_url="",
+                            proxy_default="/api/search",
+                            default="/search",
+                        )
                     ),
-                    "extract": _provider_path(
-                        explicit_name="MYSEARCH_TAVILY_EXTRACT_PATH",
-                        proxy_base_url=proxy_base_url,
-                        proxy_default="/api/extract",
-                        default="/extract",
+                    "extract": (
+                        _tavily_gateway_path(
+                            explicit_name="MYSEARCH_TAVILY_GATEWAY_EXTRACT_PATH",
+                            explicit_gateway_base_url=tavily_gateway_base_url,
+                            proxy_base_url=proxy_base_url,
+                            proxy_default="/api/extract",
+                            default="/extract",
+                        )
+                        if tavily_mode == "gateway"
+                        else _provider_path(
+                            explicit_name="MYSEARCH_TAVILY_EXTRACT_PATH",
+                            proxy_base_url="",
+                            proxy_default="/api/extract",
+                            default="/extract",
+                        )
                     ),
                 },
+                provider_mode=tavily_mode,
                 api_keys=[
-                    *_get_list("MYSEARCH_TAVILY_API_KEYS"),
+                    *(
+                        _get_list(
+                            "MYSEARCH_TAVILY_GATEWAY_TOKENS",
+                            "MYSEARCH_TAVILY_GATEWAY_API_KEYS",
+                        )
+                        if tavily_mode == "gateway"
+                        else _get_list("MYSEARCH_TAVILY_API_KEYS")
+                    ),
+                    *(
+                        [tavily_gateway_token]
+                        if tavily_mode == "gateway" and tavily_gateway_token
+                        else ([proxy_api_key] if tavily_mode == "gateway" and proxy_api_key else [])
+                    ),
                     *(
                         [_get_str("MYSEARCH_TAVILY_API_KEY")]
-                        if _get_str("MYSEARCH_TAVILY_API_KEY")
-                        else ([proxy_api_key] if proxy_api_key else [])
+                        if tavily_mode != "gateway" and _get_str("MYSEARCH_TAVILY_API_KEY")
+                        else []
                     ),
                 ],
-                keys_file=_resolve_path(
-                    "MYSEARCH_TAVILY_KEYS_FILE",
-                    "MYSEARCH_TAVILY_ACCOUNTS_FILE",
-                    default_name="accounts.txt",
+                keys_file=(
+                    None
+                    if tavily_mode == "gateway"
+                    else _resolve_path(
+                        "MYSEARCH_TAVILY_KEYS_FILE",
+                        "MYSEARCH_TAVILY_ACCOUNTS_FILE",
+                        default_name="accounts.txt",
+                    )
                 ),
             ),
             firecrawl=ProviderConfig(

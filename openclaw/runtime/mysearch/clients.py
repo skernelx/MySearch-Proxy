@@ -2733,6 +2733,7 @@ class MySearchClient:
         return {
             "base_url": provider.base_url,
             "alternate_base_urls": provider.alternate_base_urls,
+            "provider_mode": provider.provider_mode,
             "auth_mode": provider.auth_mode,
             "paths": provider.default_paths,
             "search_mode": provider.search_mode,
@@ -2747,6 +2748,15 @@ class MySearchClient:
     def _get_key_or_raise(self, provider: ProviderConfig):
         record = self.keyring.get_next(provider.name)
         if record is None:
+            if provider.name == "tavily":
+                raise MySearchError(
+                    "Tavily is not configured. Use "
+                    "MYSEARCH_TAVILY_MODE=gateway with MYSEARCH_TAVILY_GATEWAY_TOKEN "
+                    "to consume an upstream gateway, or keep "
+                    "MYSEARCH_TAVILY_MODE=official and import your own Tavily keys "
+                    "with MYSEARCH_TAVILY_API_KEY / MYSEARCH_TAVILY_API_KEYS / "
+                    "MYSEARCH_TAVILY_KEYS_FILE."
+                )
             if provider.name == "xai":
                 raise MySearchError(
                     "xAI / Social search is not configured; MySearch can still use "

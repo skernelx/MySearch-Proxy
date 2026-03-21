@@ -32,3 +32,9 @@ openclaw/.venv/
 # 本地测试输出
 htmlcov/
 .coverage
+
+# 本地 AI 辅助产物
+.ace-tool/
+llmdoc/
+.codex-tasks/
+extract.py

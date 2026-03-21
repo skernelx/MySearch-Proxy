@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 import database as db
@@ -23,6 +24,8 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
 ADMIN_SESSION_COOKIE = os.environ.get("ADMIN_SESSION_COOKIE", "mysearch_proxy_session")
 ADMIN_SESSION_MAX_AGE = max(300, int(os.environ.get("ADMIN_SESSION_MAX_AGE", "2592000")))
 TAVILY_API_BASE = "https://api.tavily.com"
+TAVILY_SEARCH_PATH = "/search"
+TAVILY_EXTRACT_PATH = "/extract"
 FIRECRAWL_API_BASE = "https://api.firecrawl.dev"
 EXA_API_BASE = "https://api.exa.ai"
 
@@ -108,6 +111,7 @@ SERVICE_LABELS = {
 }
 
 app = FastAPI(title="MySearch Proxy")
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 http_client = httpx.AsyncClient(timeout=60)
 social_gateway_state_cache = {"expires_at": 0.0, "value": None}
@@ -263,6 +267,48 @@ def get_runtime_social_config():
             SOCIAL_GATEWAY_ADMIN_APP_KEY,
         ),
         "cache_ttl_seconds": cache_ttl_seconds,
+    }
+
+
+def get_runtime_tavily_config():
+    mode = get_setting_text("tavily_mode", "pool").lower()
+    if mode not in {"pool", "upstream"}:
+        mode = "pool"
+
+    upstream_base_url = (
+        get_setting_text("tavily_upstream_base_url", TAVILY_API_BASE).rstrip("/")
+        or TAVILY_API_BASE
+    )
+    return {
+        "mode": mode,
+        "upstream_base_url": upstream_base_url,
+        "upstream_search_path": _normalize_path(
+            get_setting_text("tavily_upstream_search_path", TAVILY_SEARCH_PATH),
+            TAVILY_SEARCH_PATH,
+        ),
+        "upstream_extract_path": _normalize_path(
+            get_setting_text("tavily_upstream_extract_path", TAVILY_EXTRACT_PATH),
+            TAVILY_EXTRACT_PATH,
+        ),
+        "upstream_api_key": get_setting_text("tavily_upstream_api_key", ""),
+    }
+
+
+def build_tavily_routing_meta(config, active_keys):
+    using_upstream = config["mode"] == "upstream"
+    summary = (
+        "当前 Tavily 走上游 Gateway；切回本地 Key 池模式后才会重新使用这里导入的 Tavily keys。"
+        if using_upstream
+        else "当前 Tavily 走本地 Key 池，请求会从已导入的 Tavily keys 中轮询。"
+    )
+    return {
+        "mode": config["mode"],
+        "upstream_base_url": config["upstream_base_url"],
+        "upstream_search_path": config["upstream_search_path"],
+        "upstream_extract_path": config["upstream_extract_path"],
+        "upstream_api_key_configured": bool(config["upstream_api_key"]),
+        "local_key_count": len(active_keys),
+        "summary": summary,
     }
 
 
@@ -751,6 +797,18 @@ async def sync_usage_cache(force=False, key_id=None, service=None):
     else:
         rows = [dict(row) for row in db.get_all_keys(service)]
 
+    if rows and all((row.get("service") or "tavily") == "tavily" for row in rows):
+        tavily_config = get_runtime_tavily_config()
+        if tavily_config["mode"] == "upstream":
+            return {
+                "requested": len(rows),
+                "synced": 0,
+                "skipped": len(rows),
+                "errors": 0,
+                "supported": False,
+                "detail": "当前走 Tavily 上游 Gateway，本地 Key 池额度同步已停用",
+            }
+
     if not rows:
         return {"requested": 0, "synced": 0, "skipped": 0, "errors": 0}
 
@@ -776,6 +834,17 @@ async def sync_usage_cache(force=False, key_id=None, service=None):
 
 
 def build_usage_sync_meta_for_dashboard(service, active_keys):
+    if service == "tavily" and get_runtime_tavily_config()["mode"] == "upstream":
+        return {
+            "supported": False,
+            "requested": len(active_keys),
+            "synced": 0,
+            "skipped": len(active_keys),
+            "errors": 0,
+            "stale_keys": 0,
+            "detail": "当前走 Tavily 上游 Gateway，本地 Key 池额度同步已停用",
+        }
+
     if service == "exa":
         return {
             "supported": False,
@@ -805,6 +874,8 @@ def build_usage_sync_meta_for_dashboard(service, active_keys):
 
 async def schedule_background_usage_sync(service, active_keys):
     if not DASHBOARD_BACKGROUND_SYNC_ON_STATS:
+        return
+    if service == "tavily" and get_runtime_tavily_config()["mode"] == "upstream":
         return
     if service == "exa":
         return
@@ -901,12 +972,15 @@ async def build_service_dashboard(service, auto_sync=False):
         token["stats"] = db.get_usage_stats(token_id=token["id"], service=service)
     keys = mask_key_rows([dict(key) for key in db.get_all_keys(service)])
     active_keys = [key for key in keys if key["active"]]
+    routing = None
+    if service == "tavily":
+        routing = build_tavily_routing_meta(get_runtime_tavily_config(), active_keys)
     if auto_sync:
         sync_result = await sync_usage_cache(force=False, service=service)
     else:
         sync_result = build_usage_sync_meta_for_dashboard(service, active_keys)
         await schedule_background_usage_sync(service, active_keys)
-    return {
+    payload = {
         "service": service,
         "label": SERVICE_LABELS[service],
         "overview": overview,
@@ -917,6 +991,9 @@ async def build_service_dashboard(service, auto_sync=False):
         "real_quota": build_real_quota_summary(active_keys),
         "usage_sync": sync_result,
     }
+    if routing is not None:
+        payload["routing"] = routing
+    return payload
 
 
 async def build_mysearch_dashboard():
@@ -968,9 +1045,18 @@ async def build_social_dashboard():
 
 
 async def build_settings_payload():
+    tavily = get_runtime_tavily_config()
     config = get_runtime_social_config()
     state = await resolve_social_gateway_state(force=False)
     return {
+        "tavily": {
+            "mode": tavily["mode"],
+            "upstream_base_url": tavily["upstream_base_url"],
+            "upstream_search_path": tavily["upstream_search_path"],
+            "upstream_extract_path": tavily["upstream_extract_path"],
+            "upstream_api_key_configured": bool(tavily["upstream_api_key"]),
+            "upstream_api_key_masked": mask_secret(tavily["upstream_api_key"]),
+        },
         "social": {
             "upstream_base_url": config["upstream_base_url"],
             "upstream_responses_path": config["upstream_responses_path"],
@@ -1660,23 +1746,58 @@ async def proxy_tavily(request: Request):
     token_value = extract_token(request, body)
     token_row = get_token_row_or_401(token_value, "tavily")
 
-    key_info = pool.get_next_key("tavily")
-    if not key_info:
-        raise HTTPException(status_code=503, detail="No available API keys")
+    config = get_runtime_tavily_config()
+    path_map = {
+        "search": config["upstream_search_path"],
+        "extract": config["upstream_extract_path"],
+    }
+    upstream_path = path_map.get(endpoint)
+    if not upstream_path:
+        raise HTTPException(status_code=400, detail=f"Unsupported Tavily endpoint: {endpoint}")
 
-    body["api_key"] = key_info["key"]
+    upstream_base_url = TAVILY_API_BASE
+    upstream_key = ""
+    key_info = None
+    if config["mode"] == "upstream":
+        upstream_base_url = config["upstream_base_url"]
+        upstream_key = config["upstream_api_key"]
+        if not upstream_key:
+            raise HTTPException(status_code=503, detail="Missing Tavily upstream API key")
+    else:
+        key_info = pool.get_next_key("tavily")
+        if not key_info:
+            raise HTTPException(status_code=503, detail="No available API keys")
+        upstream_key = key_info["key"]
+
+    body["api_key"] = upstream_key
     start = time.time()
     try:
-        resp = await http_client.post(f"{TAVILY_API_BASE}/{endpoint}", json=body)
+        resp = await http_client.post(f"{upstream_base_url}{upstream_path}", json=body)
         latency = int((time.time() - start) * 1000)
         success = resp.status_code == 200
-        pool.report_result("tavily", key_info["id"], success)
-        db.log_usage(token_row["id"], key_info["id"], endpoint, int(success), latency, service="tavily")
+        if key_info is not None:
+            pool.report_result("tavily", key_info["id"], success)
+        db.log_usage(
+            token_row["id"],
+            key_info["id"] if key_info is not None else None,
+            endpoint,
+            int(success),
+            latency,
+            service="tavily",
+        )
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
     except Exception as exc:
         latency = int((time.time() - start) * 1000)
-        pool.report_result("tavily", key_info["id"], False)
-        db.log_usage(token_row["id"], key_info["id"], endpoint, 0, latency, service="tavily")
+        if key_info is not None:
+            pool.report_result("tavily", key_info["id"], False)
+        db.log_usage(
+            token_row["id"],
+            key_info["id"] if key_info is not None else None,
+            endpoint,
+            0,
+            latency,
+            service="tavily",
+        )
         raise HTTPException(status_code=502, detail=str(exc))
 
 
@@ -1941,6 +2062,43 @@ async def stats(request: Request, _=Depends(verify_admin)):
 @app.get("/api/settings")
 async def get_settings(request: Request, _=Depends(verify_admin)):
     return await build_settings_payload()
+
+
+@app.put("/api/settings/tavily")
+async def update_tavily_settings(request: Request, _=Depends(verify_admin)):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Expected JSON request body")
+
+    if "mode" in body:
+        mode = str(body.get("mode") or "").strip().lower() or "pool"
+        if mode not in {"pool", "upstream"}:
+            raise HTTPException(status_code=400, detail="mode must be 'pool' or 'upstream'")
+        db.set_setting("tavily_mode", mode)
+
+    text_fields = {
+        "upstream_base_url": "tavily_upstream_base_url",
+        "upstream_search_path": "tavily_upstream_search_path",
+        "upstream_extract_path": "tavily_upstream_extract_path",
+    }
+    for field, setting_key in text_fields.items():
+        if field not in body:
+            continue
+        value = str(body.get(field) or "").strip()
+        db.set_setting(setting_key, value)
+
+    if body.get("clear_upstream_api_key"):
+        db.set_setting("tavily_upstream_api_key", "")
+    elif "upstream_api_key" in body:
+        value = str(body.get("upstream_api_key") or "").strip()
+        if value:
+            db.set_setting("tavily_upstream_api_key", value)
+
+    reset_stats_cache()
+    return {
+        "ok": True,
+        **(await build_settings_payload()),
+    }
 
 
 @app.put("/api/settings/social")
