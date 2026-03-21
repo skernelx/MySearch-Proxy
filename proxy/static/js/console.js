@@ -476,8 +476,7 @@ function renderMySearchQuickstart(mysearch, social) {
           </div>
           <pre class="code-block mono" id="mysearch-install-cmd"></pre>
         </div>
-        <div class="subcard">
-          <h3>MySearch 通用 Token</h3>
+        <details class="subcard"><summary style="cursor:pointer;font-weight:600;font-size:18px;margin-bottom:8px;outline:none">MySearch 通用 Token</summary>
           <p class="desc">这个 token 专门给上层 MCP / Skill 用。和 Tavily / Firecrawl / Exa 各自的服务 token 分开管理，但调用时会被三条 provider 路由一起接受。</p>
           <div class="form-row">
             <input class="input-grow" type="text" id="token-name-mysearch" placeholder="可选备注，例如 Codex / Claude Code / Team Demo">
