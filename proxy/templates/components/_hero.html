@@ -1,66 +1,75 @@
 <header class="hero card">
-      <div class="hero-stack">
-        <div class="hero-topbar">
-          <div class="hero-tags">
-            <span class="hero-tag">统一搜索入口</span>
-            <span class="hero-tag">官方 / 兼容双接入</span>
-            <span class="hero-tag">MCP + Proxy + Skill</span>
-          </div>
-          <div class="hero-actions">
-            <button class="user-btn settings-btn" type="button" onclick="openSettingsModal()">
-              设置
-              <span class="muted">密码 / grok2api / 退出</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="hero-main">
-          <div class="hero-copy">
-            <h1>把搜索基础设施做成真正可交付的工作台</h1>
-            <p class="hero-intro">MySearch 把 Tavily、Exa、Firecrawl 和 Social / X 统一成一套可被 Codex、Claude Code 和团队 Agent 直接调用的搜索入口。使用者拿到后，不需要自己维护多套 provider、兼容网关和结果结构，也不需要每次手动判断这一轮该用网页搜索、正文抓取还是社交舆情。</p>
-
-            <div class="hero-usage-grid">
-              <div class="hero-usage-card">
-                <strong>统一入口</strong>
-                <span>网页发现、正文抓取、社交舆情走同一套接线方式。</span>
-              </div>
-              <div class="hero-usage-card">
-                <strong>Exa 工作区</strong>
-                <span>把 Exa 独立成可发 Token、可管 Key、可直接代理调用的新栏目。</span>
-              </div>
-              <div class="hero-usage-card">
-                <strong>统一运维</strong>
-                <span>Key 池、Token、额度同步和团队共享入口放在同一个控制台里。</span>
-              </div>
-              <div class="hero-usage-card">
-                <strong>统一兼容</strong>
-                <span>官方 API 和自定义 compatible 聚合服务都能接，不锁死单一后端。</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <section class="hero-lanes">
-          <article class="hero-lane">
-            <span class="hero-lane-kicker">Router</span>
-            <strong>Tavily 做发现</strong>
-            <p>适合新闻、快速 answer、网页线索收集，放在 MySearch 的第一层路由里。</p>
-          </article>
-          <article class="hero-lane">
-            <span class="hero-lane-kicker">Search</span>
-            <strong>Exa 做网页发现</strong>
-            <p>适合补 Tavily 之外的网页搜索入口，这里收成独立 Key 池、Token 池和代理端点。</p>
-          </article>
-          <article class="hero-lane">
-            <span class="hero-lane-kicker">Depth</span>
-            <strong>Firecrawl 做抓取</strong>
-            <p>文档站、GitHub、PDF、pricing 和 changelog 这类正文内容，交给 Firecrawl 更稳。</p>
-          </article>
-          <article class="hero-lane">
-            <span class="hero-lane-kicker">Social</span>
-            <strong>Social / X 做舆情</strong>
-            <p>兼容 grok2api 和 xAI-compatible 搜索，把 X 结果统一整理成 MySearch 可直接消费的结构。</p>
-          </article>
-        </section>
+  <div class="hero-stack">
+    <div class="hero-topbar">
+      <div class="hero-tags">
+        <span class="hero-tag">
+          <svg class="icon w-3 h-3 mr-1 inline-block" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          统一搜索入口
+        </span>
+        <span class="hero-tag">
+          <svg class="icon w-3 h-3 mr-1 inline-block" viewBox="0 0 24 24"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5H5a2 2 0 0 0-2-2z"/></svg>
+          官方 / 兼容双接入
+        </span>
+        <span class="hero-tag">
+          <svg class="icon w-3 h-3 mr-1 inline-block" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+          MCP + Proxy + Skill
+        </span>
       </div>
-    </header>
+      <div class="hero-actions">
+        <button class="user-btn settings-btn" type="button" onclick="openSettingsModal()">
+          <svg class="icon w-4 h-4 mr-1 inline-block" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          控制台设置
+        </button>
+      </div>
+    </div>
+
+    <div class="hero-main">
+      <div class="hero-copy">
+        <h1>把搜索基础设施<br>做成真正可交付的工作台</h1>
+        <p class="hero-intro">MySearch 把 Tavily、Exa、Firecrawl 和 Social / X 统一成一套可被 Codex、Claude Code 和团队 Agent 直接调用的搜索入口。使用者拿到后，不需要自己维护多套 provider、兼容网关和结果结构，也不需要每次手动判断这一轮该用网页搜索、正文抓取还是社交舆情。</p>
+
+        <div class="hero-usage-grid">
+          <div class="hero-usage-card">
+            <strong>统一入口</strong>
+            <span>网页发现、正文抓取、社交舆情走同一套接线方式。</span>
+          </div>
+          <div class="hero-usage-card">
+            <strong>Exa 工作区</strong>
+            <span>把 Exa 独立成可发 Token、可管 Key、可直接代理调用的新栏目。</span>
+          </div>
+          <div class="hero-usage-card">
+            <strong>统一运维</strong>
+            <span>Key 池、Token、额度同步和团队共享入口放在同一个控制台里。</span>
+          </div>
+          <div class="hero-usage-card">
+            <strong>统一兼容</strong>
+            <span>官方 API 和自定义 compatible 聚合服务都能接，不锁死单一后端。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="hero-lanes">
+      <article class="hero-lane" data-service="tavily">
+        <span class="hero-lane-kicker">Router</span>
+        <strong>Tavily 做发现</strong>
+        <p>适合新闻、快速 answer、网页线索收集，放在 MySearch 的第一层路由里。</p>
+      </article>
+      <article class="hero-lane" data-service="exa">
+        <span class="hero-lane-kicker">Search</span>
+        <strong>Exa 做网页发现</strong>
+        <p>适合补 Tavily 之外的网页搜索入口，这里收成独立 Key 池、Token 池和代理端点。</p>
+      </article>
+      <article class="hero-lane" data-service="firecrawl">
+        <span class="hero-lane-kicker">Depth</span>
+        <strong>Firecrawl 做抓取</strong>
+        <p>文档站、GitHub、PDF、pricing 和 changelog 这类正文内容，交给 Firecrawl 更稳。</p>
+      </article>
+      <article class="hero-lane" data-service="social">
+        <span class="hero-lane-kicker">Social</span>
+        <strong>Social / X 做舆情</strong>
+        <p>兼容 grok2api 和 xAI-compatible 搜索，把 X 结果统一整理成可直接消费的结构。</p>
+      </article>
+    </section>
+  </div>
+</header>
