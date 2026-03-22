@@ -64,6 +64,35 @@ def _build_tavily_upstream_url(base_url, path, api_key=""):
     return f"{normalized_base}{normalized_path}"
 
 
+def _build_tavily_hikari_gateway_url(base_url, path):
+    normalized_base = str(base_url or TAVILY_API_BASE).strip().rstrip("/") or TAVILY_API_BASE
+    normalized_path = _normalize_path(path, TAVILY_SEARCH_PATH)
+    parsed = urlparse(normalized_base)
+    base_path = parsed.path.rstrip("/")
+    if base_path.endswith("/api/tavily"):
+        return f"{normalized_base}{normalized_path}"
+    return f"{normalized_base}/api/tavily{normalized_path}"
+
+
+def _should_retry_tavily_hikari_compat(response, current_url, effective_mode):
+    if effective_mode != "upstream":
+        return False
+    if getattr(response, "status_code", None) != 404:
+        return False
+    current_path = urlparse(str(current_url or "")).path
+    return "/api/tavily/" not in current_path and not current_path.endswith("/api/tavily")
+
+
+async def _post_tavily_with_gateway_fallback(*, base_url, path, api_key, payload, effective_mode):
+    request_target = _build_tavily_upstream_url(base_url, path, api_key)
+    response = await http_client.post(request_target, json=payload)
+    if _should_retry_tavily_hikari_compat(response, request_target, effective_mode):
+        retry_target = _build_tavily_hikari_gateway_url(base_url, path)
+        retry_response = await http_client.post(retry_target, json=payload)
+        return retry_response, retry_target, True
+    return response, request_target, False
+
+
 def _build_tavily_hikari_public_url(base_url, target_path):
     normalized_base = str(base_url or "").strip().rstrip("/")
     if not normalized_base:
@@ -602,7 +631,13 @@ async def probe_tavily_connection(config, active_keys):
         "api_key": key_value,
     }
     try:
-        response = await http_client.post(test_url, json=request_body)
+        response, request_target, fallback_used = await _post_tavily_with_gateway_fallback(
+            base_url=upstream_base_url,
+            path=upstream_path,
+            api_key=key_value,
+            payload=request_body,
+            effective_mode=resolved["effective_mode"],
+        )
     except Exception as exc:
         return {
             "ok": False,
@@ -640,10 +675,14 @@ async def probe_tavily_connection(config, active_keys):
         "mode_source": resolved["mode_source"],
         "local_key_count": len(active_keys),
         "summary": build_tavily_routing_meta(config, active_keys)["summary"],
-        "detail": detail or f"HTTP {response.status_code}",
+        "detail": (
+            f"{detail or f'HTTP {response.status_code}'}（已自动回退到 /api/tavily 兼容路径）"
+            if fallback_used and response.status_code < 400
+            else detail or f"HTTP {response.status_code}"
+        ),
         "failure_reason": "" if response.status_code < 400 else (detail or f"HTTP {response.status_code}"),
         "probe_url": test_url,
-        "request_target": test_url,
+        "request_target": request_target,
         "auth_source": auth_source if resolved["effective_mode"] == "upstream" else f"{auth_source}（活跃 {len(active_keys)}）",
         "status_label": f"HTTP {response.status_code}",
         "recommendation": (
@@ -2187,11 +2226,16 @@ async def proxy_tavily(request: Request):
             raise HTTPException(status_code=503, detail="No available API keys")
         upstream_key = key_info["key"]
 
-    upstream_url = _build_tavily_upstream_url(upstream_base_url, upstream_path, upstream_key)
     body["api_key"] = upstream_key
     start = time.time()
     try:
-        resp = await http_client.post(upstream_url, json=body)
+        resp, request_target, _fallback_used = await _post_tavily_with_gateway_fallback(
+            base_url=upstream_base_url,
+            path=upstream_path,
+            api_key=upstream_key,
+            payload=body,
+            effective_mode=tavily_resolved["effective_mode"],
+        )
         latency = int((time.time() - start) * 1000)
         success = resp.status_code == 200
         if key_info is not None:
@@ -2204,7 +2248,10 @@ async def proxy_tavily(request: Request):
             latency,
             service="tavily",
         )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        try:
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        except Exception:
+            return Response(content=resp.text, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
     except Exception as exc:
         latency = int((time.time() - start) * 1000)
         if key_info is not None:

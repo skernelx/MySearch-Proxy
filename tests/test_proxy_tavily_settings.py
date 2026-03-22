@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 import unittest
@@ -75,6 +76,45 @@ class ProxyTavilySettingsTests(unittest.TestCase):
         self.assertFalse(meta["supported"])
         self.assertEqual(meta["requested"], 2)
         self.assertIn("上游 Gateway", meta["detail"])
+
+    def test_probe_tavily_connection_falls_back_to_api_tavily_on_404(self) -> None:
+        config = {
+            "mode": "upstream",
+            "upstream_base_url": "http://127.0.0.1:8787",
+            "upstream_search_path": "/search",
+            "upstream_extract_path": "/extract",
+            "upstream_api_key": "gateway-token-without-th-prefix",
+        }
+
+        class _Response:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self._payload = payload
+                self.headers = {"content-type": "application/json"}
+                self.text = ""
+
+            def json(self):
+                return self._payload
+
+        async def _run():
+            responses = [
+                _Response(404, {"detail": "Not Found"}),
+                _Response(200, {"results": [{"title": "ok"}]}),
+            ]
+            call_urls = []
+
+            async def fake_post(url, json):
+                call_urls.append(url)
+                return responses.pop(0)
+
+            with patch.object(self.module, "http_client") as fake_client:
+                fake_client.post.side_effect = fake_post
+                return await self.module.probe_tavily_connection(config, [])
+
+        result = asyncio.run(_run())
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["request_target"], "http://127.0.0.1:8787/api/tavily/search")
+        self.assertIn("/api/tavily", result["detail"])
 
 
 if __name__ == "__main__":
