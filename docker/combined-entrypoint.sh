@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export PYTHONPATH="${PYTHONPATH:-/app}"
+export PYTHONPATH="${PYTHONPATH:-/app}:/app/proxy"
 export MYSEARCH_PROXY_BASE_URL="${MYSEARCH_PROXY_BASE_URL:-http://127.0.0.1:9874}"
 export MYSEARCH_PROXY_HOST="${MYSEARCH_PROXY_HOST:-0.0.0.0}"
 
