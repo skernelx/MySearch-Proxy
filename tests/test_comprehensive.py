@@ -1132,6 +1132,60 @@ class ErrorHandlingTests(unittest.TestCase):
         with self.assertRaises(MySearchError):
             client.research(query="")
 
+    def test_research_evidence_includes_search_confidence_and_page_coverage(self) -> None:
+        client = _make_client()
+
+        client.search = lambda **kwargs: {  # type: ignore[method-assign]
+            "provider": "tavily",
+            "intent": "resource",
+            "strategy": "balanced",
+            "results": [
+                {
+                    "title": "Responses | OpenAI API Reference",
+                    "url": "https://platform.openai.com/docs/api-reference/responses",
+                    "snippet": "Official docs",
+                    "content": "",
+                }
+            ],
+            "citations": [
+                {
+                    "title": "Responses | OpenAI API Reference",
+                    "url": "https://platform.openai.com/docs/api-reference/responses",
+                }
+            ],
+            "evidence": {
+                "providers_consulted": ["tavily"],
+                "verification": "single-provider",
+                "citation_count": 1,
+                "source_diversity": 1,
+                "source_domains": ["openai.com"],
+                "official_source_count": 1,
+                "official_mode": "strict",
+                "confidence": "high",
+                "conflicts": [],
+            },
+        }
+        client.extract_url = lambda **kwargs: {  # type: ignore[method-assign]
+            "url": kwargs["url"],
+            "provider": "firecrawl",
+            "content": "Background mode lets requests run asynchronously.",
+            "cache": {"extract": {"hit": False, "ttl_seconds": 300}},
+        }
+
+        result = client.research(
+            query="OpenAI Responses API official docs",
+            mode="docs",
+            include_social=False,
+            scrape_top_n=1,
+        )
+
+        self.assertEqual(result["evidence"]["official_mode"], "strict")
+        self.assertEqual(result["evidence"]["search_confidence"], "high")
+        self.assertEqual(result["evidence"]["page_count"], 1)
+        self.assertEqual(result["evidence"]["page_success_rate"], 1.0)
+        self.assertEqual(result["evidence"]["confidence"], "high")
+        self.assertEqual(result["evidence"]["source_domains"], ["openai.com"])
+
 
 # ===========================================================================
 # 11  Search source normalization

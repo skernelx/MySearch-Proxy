@@ -401,6 +401,13 @@ class MySearchClient:
             annotated["route_debug"]["requested_max_results"] = requested_max_results
         if candidate_max_results is not None:
             annotated["route_debug"]["candidate_max_results"] = candidate_max_results
+        evidence = annotated.get("evidence") or {}
+        if evidence.get("official_mode"):
+            annotated["route_debug"]["official_mode"] = evidence.get("official_mode")
+        if "official_filter_applied" in evidence:
+            annotated["route_debug"]["official_filter_applied"] = bool(
+                evidence.get("official_filter_applied")
+            )
         return annotated
 
     def search(
@@ -683,6 +690,13 @@ class MySearchClient:
                 results=reranked_results,
                 citations=list(result.get("citations") or []),
             )
+        result = self._apply_official_resource_policy(
+            query=query,
+            mode=mode,
+            intent=resolved_intent,
+            result=result,
+            include_domains=include_domains,
+        )
         result = self._trim_search_payload(result, max_results=max_results)
         result = self._augment_evidence_summary(
             result,
@@ -978,6 +992,18 @@ class MySearchClient:
             web_search.get("citations") or [],
             (social.get("citations") or []) if social else [],
         )
+        evidence = self._augment_research_evidence(
+            query=query,
+            mode=mode,
+            intent=web_search.get("intent", intent if intent != "auto" else "factual"),
+            requested_page_count=len(urls),
+            pages=pages,
+            citations=citations,
+            web_search=web_search,
+            social=social,
+            social_error=social_error,
+            providers_consulted=providers_consulted,
+        )
 
         return {
             "provider": "hybrid",
@@ -989,15 +1015,7 @@ class MySearchClient:
             "social_search": social,
             "social_error": social_error,
             "citations": citations,
-            "evidence": {
-                "providers_consulted": providers_consulted,
-                "web_result_count": len(candidate_results),
-                "page_count": len([page for page in pages if not page.get("error")]),
-                "citation_count": len(citations),
-                "verification": "cross-provider"
-                if web_provider == "hybrid" or len(providers_consulted) > 1
-                else "single-provider",
-            },
+            "evidence": evidence,
             "notes": [
                 "默认用 Tavily 做发现，Firecrawl 做正文抓取，X 搜索走 xAI Responses API",
                 "如果某个 provider 没配 key，会保留错误并尽量返回其余部分",
@@ -1054,6 +1072,12 @@ class MySearchClient:
         evidence = dict(enriched.get("evidence") or {})
         results = list(enriched.get("results") or [])
         citations = list(enriched.get("citations") or [])
+        official_mode = self._resolve_official_result_mode(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_domains=include_domains,
+        )
         providers_consulted = [
             item
             for item in (
@@ -1068,6 +1092,8 @@ class MySearchClient:
             "cross-provider" if len(set(providers_consulted)) > 1 else "single-provider",
         )
         evidence.setdefault("citation_count", len(citations))
+        evidence.setdefault("official_mode", official_mode)
+        evidence.setdefault("official_filter_applied", False)
 
         source_domains = self._collect_source_domains(results=results, citations=citations)
         official_source_count = self._count_official_resource_results(
@@ -1085,10 +1111,12 @@ class MySearchClient:
             source_domains=source_domains,
             official_source_count=official_source_count,
             providers_consulted=providers_consulted,
+            official_mode=str(evidence.get("official_mode") or official_mode),
         )
         evidence["source_diversity"] = len(source_domains)
         evidence["source_domains"] = source_domains[:5]
         evidence["official_source_count"] = official_source_count
+        evidence["third_party_source_count"] = max(len(results) - official_source_count, 0)
         evidence["confidence"] = self._estimate_search_confidence(
             mode=mode,
             intent=intent,
@@ -1097,10 +1125,200 @@ class MySearchClient:
             official_source_count=official_source_count,
             verification=str(evidence.get("verification") or "single-provider"),
             conflicts=conflicts,
+            official_mode=str(evidence.get("official_mode") or official_mode),
         )
         evidence["conflicts"] = conflicts
         enriched["evidence"] = evidence
         return enriched
+
+    def _resolve_official_result_mode(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        include_domains: list[str] | None,
+    ) -> str:
+        if include_domains:
+            return "strict"
+        if self._looks_like_official_query(query):
+            return "strict"
+        if self._should_rerank_resource_results(mode=mode, intent=intent):
+            return "standard"
+        return "off"
+
+    def _looks_like_official_query(self, query: str) -> bool:
+        query_lower = query.lower()
+        if re.search(r"\bofficial\b", query_lower):
+            return True
+        official_markers = (
+            "官网",
+            "官方",
+            "原文",
+            "定价官方",
+            "官方定价",
+            "官方价格",
+            "官方文档",
+        )
+        return any(marker in query for marker in official_markers)
+
+    def _apply_official_resource_policy(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        result: dict[str, Any],
+        include_domains: list[str] | None,
+    ) -> dict[str, Any]:
+        enriched = dict(result)
+        results = list(enriched.get("results") or [])
+        citations = list(enriched.get("citations") or [])
+        official_mode = self._resolve_official_result_mode(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_domains=include_domains,
+        )
+        evidence = dict(enriched.get("evidence") or {})
+        evidence.setdefault("official_mode", official_mode)
+        evidence.setdefault("official_filter_applied", False)
+        evidence.setdefault("official_candidate_count", 0)
+        if official_mode == "off" or not results:
+            enriched["evidence"] = evidence
+            return enriched
+
+        official_candidates = self._collect_official_result_candidates(
+            query=query,
+            mode=mode,
+            results=results,
+            include_domains=include_domains,
+            strict_official=official_mode == "strict",
+        )
+        evidence["official_candidate_count"] = len(official_candidates)
+        if official_mode == "strict" and official_candidates:
+            evidence["official_filter_applied"] = len(official_candidates) < len(results)
+            enriched["results"] = official_candidates
+            enriched["citations"] = self._align_citations_with_results(
+                results=official_candidates,
+                citations=citations,
+            )
+        enriched["evidence"] = evidence
+        return enriched
+
+    def _collect_official_result_candidates(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        results: list[dict[str, Any]],
+        include_domains: list[str] | None,
+        strict_official: bool,
+    ) -> list[dict[str, Any]]:
+        query_tokens = self._query_brand_tokens(query)
+        candidates: list[dict[str, Any]] = []
+        for item in results:
+            if self._result_matches_official_policy(
+                item=item,
+                mode=mode,
+                query_tokens=query_tokens,
+                include_domains=include_domains,
+                strict_official=strict_official,
+            ):
+                candidates.append(dict(item))
+        return candidates
+
+    def _augment_research_evidence(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: str,
+        requested_page_count: int,
+        pages: list[dict[str, Any]],
+        citations: list[dict[str, Any]],
+        web_search: dict[str, Any],
+        social: dict[str, Any] | None,
+        social_error: str,
+        providers_consulted: list[str],
+    ) -> dict[str, Any]:
+        successful_pages = [page for page in pages if not page.get("error")]
+        page_error_count = max(len(pages) - len(successful_pages), 0)
+        page_success_rate = (
+            round(len(successful_pages) / requested_page_count, 2)
+            if requested_page_count > 0
+            else 0.0
+        )
+        web_evidence = dict(web_search.get("evidence") or {})
+        source_domains = self._collect_source_domains(
+            results=successful_pages,
+            citations=citations,
+        )
+        conflicts = list(web_evidence.get("conflicts") or [])
+        if requested_page_count and not successful_pages:
+            conflicts.append("page-extraction-unavailable")
+        elif requested_page_count and page_error_count > 0:
+            conflicts.append("page-extraction-partial")
+        if social_error:
+            conflicts.append("social-search-unavailable")
+
+        official_mode = str(
+            web_evidence.get("official_mode")
+            or self._resolve_official_result_mode(
+                query=query,
+                mode=mode,
+                intent=str(intent) if isinstance(intent, str) else "factual",
+                include_domains=None,
+            )
+        )
+        confidence = self._estimate_research_confidence(
+            search_confidence=str(web_evidence.get("confidence") or "low"),
+            page_success_count=len(successful_pages),
+            requested_page_count=requested_page_count,
+            social_present=social is not None,
+            social_error=bool(social_error),
+            conflicts=conflicts,
+        )
+        return {
+            "providers_consulted": providers_consulted,
+            "web_result_count": len(web_search.get("results") or []),
+            "page_count": len(successful_pages),
+            "page_error_count": page_error_count,
+            "page_success_rate": page_success_rate,
+            "citation_count": len(citations),
+            "verification": "cross-provider"
+            if web_search.get("provider") == "hybrid" or len(providers_consulted) > 1
+            else "single-provider",
+            "source_diversity": len(source_domains),
+            "source_domains": source_domains[:5],
+            "official_source_count": int(web_evidence.get("official_source_count") or 0),
+            "official_mode": official_mode,
+            "search_confidence": str(web_evidence.get("confidence") or "low"),
+            "confidence": confidence,
+            "conflicts": conflicts,
+        }
+
+    def _estimate_research_confidence(
+        self,
+        *,
+        search_confidence: str,
+        page_success_count: int,
+        requested_page_count: int,
+        social_present: bool,
+        social_error: bool,
+        conflicts: list[str],
+    ) -> str:
+        if "strict-official-unmet" in conflicts or "page-extraction-unavailable" in conflicts:
+            return "low"
+        if search_confidence == "high" and page_success_count > 0 and not social_error:
+            return "high"
+        if search_confidence in {"high", "medium"} and (
+            page_success_count > 0 or requested_page_count <= 0 or not social_present
+        ):
+            return "medium"
+        if search_confidence == "high":
+            return "medium"
+        return "low" if conflicts else "medium"
 
     def _should_request_search_answer(
         self,
@@ -2828,6 +3046,7 @@ class MySearchClient:
             return results
 
         query_tokens = self._query_brand_tokens(query)
+        strict_official = bool(include_domains) or self._looks_like_official_query(query)
         ranked = sorted(
             enumerate(results),
             key=lambda pair: (
@@ -2836,6 +3055,7 @@ class MySearchClient:
                     item=pair[1],
                     query_tokens=query_tokens,
                     include_domains=include_domains,
+                    strict_official=strict_official,
                 ),
                 -pair[0],
             ),
@@ -2850,48 +3070,36 @@ class MySearchClient:
         item: dict[str, Any],
         query_tokens: list[str],
         include_domains: list[str] | None,
-    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int]:
-        url = item.get("url", "")
-        hostname = self._result_hostname(item)
-        registered_domain = self._registered_domain(hostname)
-        title_text = (item.get("title") or "").lower()
-        include_match = int(
-            bool(include_domains)
-            and any(self._domain_matches(hostname, domain) for domain in include_domains or [])
+        strict_official: bool,
+    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int, int]:
+        flags = self._resource_result_flags(
+            mode=mode,
+            item=item,
+            query_tokens=query_tokens,
+            include_domains=include_domains,
         )
-        host_brand_match = int(
-            any(token in hostname or token in registered_domain for token in query_tokens)
-        )
-        title_brand_match = int(any(token in title_text for token in query_tokens))
-        docs_shape_match = int(
-            self._looks_like_resource_result(
-                url=url,
-                hostname=hostname,
-                title_text=title_text,
-                mode=mode,
-            )
-        )
+        include_match = int(flags["include_match"])
+        host_brand_match = int(flags["host_brand_match"])
+        registered_domain_label_match = int(flags["registered_domain_label_match"])
+        title_brand_match = int(flags["title_brand_match"])
+        docs_shape_match = int(flags["docs_shape_match"])
         github_bonus = int(
             mode == "github"
-            and hostname in {"github.com", "raw.githubusercontent.com"}
+            and flags["hostname"] in {"github.com", "raw.githubusercontent.com"}
         )
-        pdf_bonus = int(mode == "pdf" and self._looks_like_pdf_url(url))
-        non_third_party = int(
-            not self._is_obvious_third_party_resource(
-                hostname=hostname,
-                registered_domain=registered_domain,
-                mode=mode,
-            )
-        )
+        pdf_bonus = int(mode == "pdf" and self._looks_like_pdf_url(item.get("url", "")))
+        non_third_party = int(flags["non_third_party"])
         official_resource_match = int(
             self._is_probably_official_resource_result(
                 mode=mode,
-                hostname=hostname,
+                hostname=str(flags["hostname"]),
                 include_match=bool(include_match),
+                registered_domain_label_match=bool(registered_domain_label_match),
                 host_brand_match=bool(host_brand_match),
                 title_brand_match=bool(title_brand_match),
                 docs_shape_match=bool(docs_shape_match),
                 non_third_party=bool(non_third_party),
+                official_query=strict_official,
             )
         )
         matched_provider_count = len(item.get("matched_providers") or [])
@@ -2899,6 +3107,7 @@ class MySearchClient:
         return (
             include_match,
             official_resource_match,
+            registered_domain_label_match,
             github_bonus,
             pdf_bonus,
             host_brand_match,
@@ -2917,10 +3126,12 @@ class MySearchClient:
         mode: SearchMode,
         hostname: str,
         include_match: bool,
+        registered_domain_label_match: bool,
         host_brand_match: bool,
         title_brand_match: bool,
         docs_shape_match: bool,
         non_third_party: bool,
+        official_query: bool,
     ) -> bool:
         if include_match:
             return True
@@ -2928,6 +3139,8 @@ class MySearchClient:
             return True
         if not non_third_party:
             return False
+        if official_query and registered_domain_label_match:
+            return True
         if not docs_shape_match:
             return False
         official_host_surface = any(
@@ -2935,7 +3148,9 @@ class MySearchClient:
             for part in hostname.split(".")
             if part
         )
-        return host_brand_match or (title_brand_match and official_host_surface)
+        return registered_domain_label_match or (host_brand_match and official_host_surface) or (
+            title_brand_match and official_host_surface
+        )
 
     def _align_citations_with_results(
         self,
@@ -3048,6 +3263,87 @@ class MySearchClient:
         cleaned_domain = self._clean_hostname(domain)
         return bool(cleaned_host) and bool(cleaned_domain) and (
             cleaned_host == cleaned_domain or cleaned_host.endswith(f".{cleaned_domain}")
+        )
+
+    def _registered_domain_label_matches(self, *, registered_domain: str, query_tokens: list[str]) -> bool:
+        labels = [item for item in self._clean_hostname(registered_domain).split(".") if item]
+        return any(
+            label == token or label.startswith(f"{token}-") or label.startswith(f"{token}_")
+            for token in query_tokens
+            for label in labels
+        )
+
+    def _resource_result_flags(
+        self,
+        *,
+        mode: SearchMode,
+        item: dict[str, Any],
+        query_tokens: list[str],
+        include_domains: list[str] | None,
+    ) -> dict[str, Any]:
+        url = item.get("url", "")
+        hostname = self._result_hostname(item)
+        registered_domain = self._registered_domain(hostname)
+        title_text = (item.get("title") or "").lower()
+        include_match = bool(
+            include_domains
+            and any(self._domain_matches(hostname, domain) for domain in include_domains or [])
+        )
+        host_brand_match = any(
+            token in hostname or token in registered_domain for token in query_tokens
+        )
+        registered_domain_label_match = self._registered_domain_label_matches(
+            registered_domain=registered_domain,
+            query_tokens=query_tokens,
+        )
+        title_brand_match = any(token in title_text for token in query_tokens)
+        docs_shape_match = self._looks_like_resource_result(
+            url=url,
+            hostname=hostname,
+            title_text=title_text,
+            mode=mode,
+        )
+        non_third_party = not self._is_obvious_third_party_resource(
+            hostname=hostname,
+            registered_domain=registered_domain,
+            mode=mode,
+        )
+        return {
+            "hostname": hostname,
+            "registered_domain": registered_domain,
+            "include_match": include_match,
+            "host_brand_match": host_brand_match,
+            "registered_domain_label_match": registered_domain_label_match,
+            "title_brand_match": title_brand_match,
+            "docs_shape_match": docs_shape_match,
+            "non_third_party": non_third_party,
+        }
+
+    def _result_matches_official_policy(
+        self,
+        *,
+        item: dict[str, Any],
+        mode: SearchMode,
+        query_tokens: list[str],
+        include_domains: list[str] | None,
+        strict_official: bool,
+    ) -> bool:
+        flags = self._resource_result_flags(
+            mode=mode,
+            item=item,
+            query_tokens=query_tokens,
+            include_domains=include_domains,
+        )
+        return self._is_probably_official_resource_result(
+            mode=mode,
+            hostname=str(flags["hostname"]),
+            include_match=bool(flags["include_match"]),
+            registered_domain_label_match=bool(flags["registered_domain_label_match"]),
+            host_brand_match=bool(flags["host_brand_match"]),
+            title_brand_match=bool(flags["title_brand_match"]),
+            docs_shape_match=bool(flags["docs_shape_match"]),
+            non_third_party=bool(flags["non_third_party"]),
+            official_query=strict_official,
         )
 
     def _query_brand_tokens(self, query: str) -> list[str]:
@@ -3215,41 +3511,24 @@ class MySearchClient:
         results: list[dict[str, Any]],
         include_domains: list[str] | None,
     ) -> int:
-        if not self._should_rerank_resource_results(mode=mode, intent=intent):
+        official_mode = self._resolve_official_result_mode(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_domains=include_domains,
+        )
+        if official_mode == "off" and not self._should_rerank_resource_results(mode=mode, intent=intent):
             return 0
         query_tokens = self._query_brand_tokens(query)
+        strict_official = official_mode == "strict"
         official_count = 0
         for item in results:
-            hostname = self._result_hostname(item)
-            registered_domain = self._registered_domain(hostname)
-            title_text = (item.get("title") or "").lower()
-            include_match = bool(
-                include_domains
-                and any(self._domain_matches(hostname, domain) for domain in include_domains)
-            )
-            host_brand_match = any(
-                token in hostname or token in registered_domain for token in query_tokens
-            )
-            title_brand_match = any(token in title_text for token in query_tokens)
-            docs_shape_match = self._looks_like_resource_result(
-                url=item.get("url", ""),
-                hostname=hostname,
-                title_text=title_text,
+            if self._result_matches_official_policy(
+                item=item,
                 mode=mode,
-            )
-            non_third_party = not self._is_obvious_third_party_resource(
-                hostname=hostname,
-                registered_domain=registered_domain,
-                mode=mode,
-            )
-            if self._is_probably_official_resource_result(
-                mode=mode,
-                hostname=hostname,
-                include_match=include_match,
-                host_brand_match=host_brand_match,
-                title_brand_match=title_brand_match,
-                docs_shape_match=docs_shape_match,
-                non_third_party=non_third_party,
+                query_tokens=query_tokens,
+                include_domains=include_domains,
+                strict_official=strict_official,
             ):
                 official_count += 1
         return official_count
@@ -3264,6 +3543,7 @@ class MySearchClient:
         source_domains: list[str],
         official_source_count: int,
         providers_consulted: list[str],
+        official_mode: str,
     ) -> list[str]:
         conflicts: list[str] = []
         if len(source_domains) <= 1 and len(results) > 1:
@@ -3277,6 +3557,8 @@ class MySearchClient:
                 conflicts.append("mixed-official-and-third-party")
             if include_domains and not results:
                 conflicts.append("domain-filter-returned-empty")
+        if official_mode == "strict" and results and official_source_count <= 0:
+            conflicts.append("strict-official-unmet")
         return conflicts
 
     def _estimate_search_confidence(
@@ -3289,8 +3571,11 @@ class MySearchClient:
         official_source_count: int,
         verification: str,
         conflicts: list[str],
+        official_mode: str,
     ) -> str:
         if result_count <= 0:
+            return "low"
+        if official_mode == "strict" and official_source_count <= 0:
             return "low"
         if self._should_rerank_resource_results(mode=mode, intent=intent):
             if official_source_count > 0 and "official-source-not-confirmed" not in conflicts:

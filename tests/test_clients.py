@@ -707,6 +707,146 @@ class MySearchClientTests(unittest.TestCase):
         self.assertEqual(result["evidence"]["confidence"], "medium")
         self.assertIn("mixed-official-and-third-party", result["evidence"]["conflicts"])
 
+    def test_search_strict_official_mode_filters_to_official_results(self) -> None:
+        client = MySearchClient()
+        client._search_tavily = lambda **kwargs: {  # type: ignore[method-assign]
+            "provider": "tavily",
+            "transport": "env",
+            "query": kwargs["query"],
+            "answer": "",
+            "results": [
+                {
+                    "provider": "tavily",
+                    "source": "web",
+                    "title": "Playwright test.step Guide",
+                    "url": "https://www.checklyhq.com/blog/playwright-test-step-guide/",
+                    "snippet": "Third-party guide",
+                    "content": "",
+                },
+                {
+                    "provider": "tavily",
+                    "source": "web",
+                    "title": "test.step | Playwright",
+                    "url": "https://playwright.dev/docs/api/class-test",
+                    "snippet": "Official Playwright docs",
+                    "content": "",
+                },
+            ],
+            "citations": [
+                {
+                    "title": "Playwright test.step Guide",
+                    "url": "https://www.checklyhq.com/blog/playwright-test-step-guide/",
+                },
+                {
+                    "title": "test.step | Playwright",
+                    "url": "https://playwright.dev/docs/api/class-test",
+                },
+            ],
+        }
+
+        result = client.search(
+            query="Playwright test.step official docs",
+            mode="docs",
+            strategy="fast",
+            provider="tavily",
+            include_domains=["playwright.dev"],
+            include_answer=False,
+        )
+
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["results"][0]["url"], "https://playwright.dev/docs/api/class-test")
+        self.assertEqual(result["evidence"]["official_mode"], "strict")
+        self.assertTrue(result["evidence"]["official_filter_applied"])
+        self.assertEqual(result["evidence"]["official_source_count"], 1)
+        self.assertNotIn("mixed-official-and-third-party", result["evidence"]["conflicts"])
+
+    def test_search_strict_official_mode_keeps_results_but_flags_unmet(self) -> None:
+        client = MySearchClient()
+        client._search_tavily = lambda **kwargs: {  # type: ignore[method-assign]
+            "provider": "tavily",
+            "transport": "env",
+            "query": kwargs["query"],
+            "answer": "",
+            "results": [
+                {
+                    "provider": "tavily",
+                    "source": "web",
+                    "title": "OpenAI API Pricing Guide",
+                    "url": "https://apidog.com/blog/openai-api-pricing/",
+                    "snippet": "Third-party pricing guide",
+                    "content": "",
+                },
+            ],
+            "citations": [
+                {
+                    "title": "OpenAI API Pricing Guide",
+                    "url": "https://apidog.com/blog/openai-api-pricing/",
+                },
+            ],
+        }
+
+        result = client.search(
+            query="OpenAI pricing official",
+            mode="web",
+            strategy="fast",
+            provider="tavily",
+            include_answer=False,
+        )
+
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["evidence"]["official_mode"], "strict")
+        self.assertFalse(result["evidence"]["official_filter_applied"])
+        self.assertIn("strict-official-unmet", result["evidence"]["conflicts"])
+        self.assertEqual(result["evidence"]["confidence"], "low")
+
+    def test_search_strict_official_mode_counts_official_hits_for_web_queries(self) -> None:
+        client = MySearchClient()
+        client._search_tavily = lambda **kwargs: {  # type: ignore[method-assign]
+            "provider": "tavily",
+            "transport": "env",
+            "query": kwargs["query"],
+            "answer": "",
+            "results": [
+                {
+                    "provider": "tavily",
+                    "source": "web",
+                    "title": "API Pricing | OpenAI",
+                    "url": "https://openai.com/api/pricing/",
+                    "snippet": "Official pricing page",
+                    "content": "",
+                },
+                {
+                    "provider": "tavily",
+                    "source": "web",
+                    "title": "OpenAI API Pricing Guide",
+                    "url": "https://apidog.com/blog/openai-api-pricing/",
+                    "snippet": "Third-party pricing guide",
+                    "content": "",
+                },
+            ],
+            "citations": [
+                {"title": "API Pricing | OpenAI", "url": "https://openai.com/api/pricing/"},
+                {
+                    "title": "OpenAI API Pricing Guide",
+                    "url": "https://apidog.com/blog/openai-api-pricing/",
+                },
+            ],
+        }
+
+        result = client.search(
+            query="OpenAI pricing official",
+            mode="web",
+            strategy="fast",
+            provider="tavily",
+            include_answer=False,
+        )
+
+        self.assertEqual(result["results"][0]["url"], "https://openai.com/api/pricing/")
+        self.assertEqual(result["evidence"]["official_mode"], "strict")
+        self.assertEqual(result["evidence"]["official_source_count"], 1)
+        self.assertTrue(result["evidence"]["official_filter_applied"])
+        self.assertNotIn("strict-official-unmet", result["evidence"]["conflicts"])
+
 
 if __name__ == "__main__":
     unittest.main()
