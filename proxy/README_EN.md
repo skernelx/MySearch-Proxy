@@ -208,7 +208,7 @@ docker run -d \
   --restart unless-stopped \
   -p 9874:9874 \
   -e ADMIN_PASSWORD=your-admin-password \
-  -v $(pwd)/mysearch-proxy-data:/app/data \
+  -v $(pwd)/mysearch-proxy-data:/data \
   your-registry/mysearch-proxy:latest
 ```
 
@@ -248,11 +248,11 @@ docker run -d \
   --restart unless-stopped \
   -p 9874:9874 \
   -e ADMIN_PASSWORD=your-admin-password \
-  -v /your/data/path:/app/data \
+  -v /your/data/path:/data \
   your-registry/mysearch-proxy:latest
 ```
 
-As long as the `/app/data` volume is preserved, your existing:
+As long as the `/data` volume is preserved, your existing:
 
 - keys
 - tokens
@@ -260,6 +260,8 @@ As long as the `/app/data` volume is preserved, your existing:
 - historical stats
 
 remain available.
+
+Use `/data` consistently for both the standalone `mysearch-proxy` container and the single-container `mysearch-stack`. Do not mix `/app/data` and `/app/proxy/data`, or an upgrade/recreate will appear to "lose" data while actually switching to a different empty SQLite file.
 
 ## Configuration
 

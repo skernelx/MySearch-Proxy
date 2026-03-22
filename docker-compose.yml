@@ -7,13 +7,14 @@ services:
       - "${MYSEARCH_PROXY_PORT:-9874}:9874"
     environment:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      MYSEARCH_PROXY_DB_PATH: ${MYSEARCH_PROXY_DB_PATH:-/data/proxy.db}
       MYSEARCH_PROXY_BOOTSTRAP_TOKEN: ${MYSEARCH_PROXY_BOOTSTRAP_TOKEN:-change-me-bootstrap-token}
       STATS_CACHE_TTL_SECONDS: ${STATS_CACHE_TTL_SECONDS:-8}
       DASHBOARD_AUTO_SYNC_ON_STATS: ${DASHBOARD_AUTO_SYNC_ON_STATS:-0}
       DASHBOARD_BACKGROUND_SYNC_ON_STATS: ${DASHBOARD_BACKGROUND_SYNC_ON_STATS:-1}
       DASHBOARD_BACKGROUND_SYNC_MIN_INTERVAL_SECONDS: ${DASHBOARD_BACKGROUND_SYNC_MIN_INTERVAL_SECONDS:-45}
     volumes:
-      - mysearch-proxy-data:/app/data
+      - mysearch-proxy-data:/data
     restart: unless-stopped
 
   mysearch:

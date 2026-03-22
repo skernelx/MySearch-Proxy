@@ -474,7 +474,7 @@ docker run -d \
   --restart unless-stopped \
   -p 9874:9874 \
   -e ADMIN_PASSWORD=your-admin-password \
-  -v $(pwd)/mysearch-proxy-data:/app/data \
+  -v $(pwd)/mysearch-proxy-data:/data \
   skernelx/mysearch-proxy:latest
 ```
 

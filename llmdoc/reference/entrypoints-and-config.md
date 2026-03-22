@@ -138,7 +138,7 @@ OpenClaw 侧也是 host-config-first，但入口不同：
 
 ### Proxy SQLite
 
-- 数据库路径：`proxy/data/proxy.db`，见 `proxy/database.py:11`。
+- 数据库路径默认是 `proxy/data/proxy.db`，但容器部署现在统一建议通过 `MYSEARCH_PROXY_DB_PATH=/data/proxy.db` 覆盖，避免独立 `proxy` 镜像和 `mysearch-stack` 因内部目录不同而各自写到不同位置。见 `proxy/database.py:11`、`proxy/database.py:15`、`proxy/Dockerfile:1`、`Dockerfile.stack:1`。
 - 主要表：`api_keys`、`tokens`、`usage_logs`、`settings`，见 `proxy/database.py:61`。
 - 下游 token 服务范围包含 `tavily`、`firecrawl`、`exa`、`mysearch`；`mysearch` token 前缀为 `mysp-`。见 `proxy/database.py:12`、`proxy/database.py:13`、`proxy/database.py:14`。
 

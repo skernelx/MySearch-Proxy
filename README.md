@@ -207,7 +207,7 @@ docker run -d \
   -p 8000:8000 \
   -e ADMIN_PASSWORD=change-me \
   -e MYSEARCH_PROXY_BOOTSTRAP_TOKEN=change-me-bootstrap-token \
-  -v $(pwd)/mysearch-proxy-data:/app/proxy/data \
+  -v $(pwd)/mysearch-proxy-data:/data \
   skernelx/mysearch-stack:latest
 ```
 

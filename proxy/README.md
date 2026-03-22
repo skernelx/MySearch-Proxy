@@ -153,7 +153,7 @@ docker run -d \
   --restart unless-stopped \
   -p 9874:9874 \
   -e ADMIN_PASSWORD=change-me \
-  -v $(pwd)/mysearch-proxy-data:/app/data \
+  -v $(pwd)/mysearch-proxy-data:/data \
   skernelx/mysearch-proxy:latest
 ```
 
@@ -194,7 +194,7 @@ docker run -d \
   -p 8000:8000 \
   -e ADMIN_PASSWORD=change-me \
   -e MYSEARCH_PROXY_BOOTSTRAP_TOKEN=change-me-bootstrap-token \
-  -v $(pwd)/mysearch-proxy-data:/app/proxy/data \
+  -v $(pwd)/mysearch-proxy-data:/data \
   skernelx/mysearch-stack:latest
 ```
 
@@ -222,6 +222,8 @@ ADMIN_PASSWORD=change-me uvicorn server:app --host 0.0.0.0 --port 9874
 6. 把 `MYSEARCH_PROXY_BASE_URL` 和 `MYSEARCH_PROXY_API_KEY` 填给客户端
 
 当前控制台已经带密码登录，不再适合匿名裸放在公网。
+
+持久化目录现在统一建议挂到 `/data`。无论你跑独立 `mysearch-proxy` 还是单容器 `mysearch-stack`，都保持 `-v ...:/data`，不要再混用 `/app/data` 和 `/app/proxy/data`，否则升级重建容器时会像“数据丢失”，实际只是读到了另一份空 SQLite。
 
 ## 下游怎么接
 
@@ -274,9 +276,9 @@ MYSEARCH_PROXY_API_KEY=mysp-...
 默认数据目录：
 
 - Docker compose
-  - `./data`
+  - 宿主目录 `./data` 挂到容器内 `/data`
 - `docker run` 示例
-  - `$(pwd)/mysearch-proxy-data`
+  - 宿主目录 `$(pwd)/mysearch-proxy-data` 挂到容器内 `/data`
 
 ## 认证与安全
 

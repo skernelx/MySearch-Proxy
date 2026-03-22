@@ -8,7 +8,7 @@ import sqlite3
 import string
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "proxy.db")
+DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "data", "proxy.db")
 SUPPORTED_SERVICES = ("tavily", "firecrawl", "exa")
 TOKEN_SERVICES = SUPPORTED_SERVICES + ("mysearch",)
 TOKEN_PREFIX = {
@@ -50,9 +50,15 @@ def normalize_token_service(service):
     return service
 
 
+def get_db_path():
+    configured = (os.environ.get("MYSEARCH_PROXY_DB_PATH") or "").strip()
+    return configured or DEFAULT_DB_PATH
+
+
 def get_conn():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    db_path = get_db_path()
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
