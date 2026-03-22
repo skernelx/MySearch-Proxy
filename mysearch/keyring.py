@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass as _dataclass
 from threading import Lock
 
 from mysearch.config import MySearchConfig, ProviderConfig
+
+
+def dataclass(*args, **kwargs):
+    if sys.version_info < (3, 10):
+        kwargs.pop("slots", None)
+    return _dataclass(*args, **kwargs)
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,16 +4,21 @@
     <div class="settings-head">
       <div>
         <div class="settings-kicker">Console Settings</div>
-        <h2 id="settings-title">设置</h2>
-        <p>这里不再堆成一大张表单，而是按控制台、Tavily、Social / X 三个面板分开管理。保存后会立即刷新当前控制台状态。</p>
+        <h2 id="settings-title">控制台配置中心</h2>
+        <p>把登录权限、Tavily 路由和 Social / X 上游分开管理。保存后会立即刷新当前控制台状态，不需要手动重载页面。</p>
+        <div class="settings-head-meta">
+          <span class="settings-meta-pill">Console</span>
+          <span class="settings-meta-pill">Tavily</span>
+          <span class="settings-meta-pill">Social / X</span>
+        </div>
       </div>
-      <button class="btn btn-soft" type="button" onclick="closeSettingsModal()">关闭</button>
+      <button class="btn btn-soft" type="button" data-overlay-autofocus="true" onclick="closeSettingsModal()">关闭</button>
     </div>
 
     <div class="settings-tabs" role="tablist" aria-label="Settings tabs">
-      <button type="button" class="settings-tab is-active" data-settings-tab="console" onclick="setActiveSettingsTab('console')">控制台</button>
-      <button type="button" class="settings-tab" data-settings-tab="tavily" onclick="setActiveSettingsTab('tavily')">Tavily</button>
-      <button type="button" class="settings-tab" data-settings-tab="social" onclick="setActiveSettingsTab('social')">Social / X</button>
+      <button type="button" class="settings-tab is-active" data-settings-tab="console" aria-selected="true" onclick="setActiveSettingsTab('console')">控制台</button>
+      <button type="button" class="settings-tab" data-settings-tab="tavily" aria-selected="false" onclick="setActiveSettingsTab('tavily')">Tavily</button>
+      <button type="button" class="settings-tab" data-settings-tab="social" aria-selected="false" onclick="setActiveSettingsTab('social')">Social / X</button>
     </div>
 
     <section class="settings-panel settings-tab-panel is-active" data-settings-panel="console">
@@ -27,7 +32,8 @@
           </div>
         </div>
         <div class="settings-panel-main">
-          <form onsubmit="changePwd(event)">
+          <form class="settings-form" onsubmit="changePwd(event)">
+            <div class="settings-summary-strip" id="settings-console-summary"></div>
             <input type="text" name="proxy-admin-user-reset" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;opacity:0;pointer-events:none;height:0">
             <div class="settings-fields">
               <div class="settings-field full-width">
@@ -36,9 +42,15 @@
                 <div class="hint">控制台登录密码会立即更新到当前会话。</div>
               </div>
             </div>
-            <div class="settings-actions">
-              <button type="submit" class="btn btn-primary">保存新密码</button>
-              <button type="button" class="btn btn-danger" onclick="logoutFromSettings()">退出登录</button>
+            <div class="settings-footer">
+              <div class="settings-footer-copy">
+                <strong>当前 tab 的保存区会固定在底部。</strong>
+                <span>修改后立即写入数据库，并刷新当前控制台状态。</span>
+              </div>
+              <div class="settings-footer-actions">
+                <button type="submit" class="btn btn-primary">保存新密码</button>
+                <button type="button" class="btn btn-danger" onclick="logoutFromSettings()">退出登录</button>
+              </div>
             </div>
             <div class="settings-status hidden" id="settings-password-status"></div>
           </form>
@@ -50,47 +62,59 @@
       <div class="settings-panel-grid">
         <div class="settings-panel-aside">
           <h3>Tavily 路由</h3>
-          <p>这里决定 Tavily 继续走本地 key pool，还是切到外部 gateway。切到上游后，本地 Key 池只保留展示，不再参与 Tavily 转发。</p>
+          <p>这里决定 Tavily 走自动识别、API Key 池，还是外部 gateway。自动识别不是 Social/X 那种后台继承，而是按“上游凭证优先，其次本地 API Key 池”的规则选实际接线。</p>
           <div class="settings-note-list">
-            <div class="settings-note">`pool` 适合你自己维护官方 key。</div>
-            <div class="settings-note">`upstream` 适合接 `tavily-hikari` 这类聚合网关。</div>
+            <div class="settings-note">`auto` 适合作为默认模式。检测到上游凭证就走 Gateway；如果你只是导入 Tavily key，就会默认落到 API Key 池。</div>
+            <div class="settings-note">`pool` 适合你自己维护官方 key；`upstream` 适合接 `tavily-hikari` 这类聚合网关。</div>
           </div>
           <div class="settings-secret-meta" id="settings-tavily-meta"></div>
         </div>
         <div class="settings-panel-main">
-          <form onsubmit="saveTavilySettings(event)">
+          <form class="settings-form" onsubmit="saveTavilySettings(event)">
+            <div class="settings-summary-strip" id="settings-tavily-summary"></div>
             <div class="settings-fields">
               <div class="settings-field">
                 <label for="settings-tavily-mode">工作模式</label>
-                <select id="settings-tavily-mode" class="form-select">
-                  <option value="pool">本地 Key 池</option>
-                  <option value="upstream">上游 Gateway</option>
-                </select>
-                <div class="hint">切到上游模式后，Tavily 请求不再消耗本地 Key 池。</div>
+                <input type="hidden" id="settings-tavily-mode" value="auto">
+                <div class="mode-switch" role="tablist" aria-label="Tavily mode switch">
+                  <button type="button" class="mode-switch-btn is-active" data-tavily-mode="auto" aria-selected="true" onclick="setTavilyMode('auto')">自动识别</button>
+                  <button type="button" class="mode-switch-btn" data-tavily-mode="pool" aria-selected="false" onclick="setTavilyMode('pool')">API Key 池</button>
+                  <button type="button" class="mode-switch-btn" data-tavily-mode="upstream" aria-selected="false" onclick="setTavilyMode('upstream')">上游 Gateway</button>
+                </div>
+                <div class="hint" id="settings-tavily-mode-hint">自动模式会先检测上游凭证；如果你只是导入 Tavily key，就会默认回到 API Key 池。</div>
+                <div class="mode-runtime-strip" id="settings-tavily-runtime-strip">当前实际：等待识别</div>
               </div>
-              <div class="settings-field">
+              <div class="settings-field" data-tavily-upstream-field="true">
                 <label for="settings-tavily-upstream-base-url">上游 Base URL</label>
                 <input type="text" id="settings-tavily-upstream-base-url" placeholder="https://tavily.example.com/api/tavily">
                 <div class="hint">例如 `tavily-hikari` 可直接填写到 `/api/tavily`。</div>
               </div>
-              <div class="settings-field">
+              <div class="settings-field" data-tavily-upstream-field="true">
                 <label for="settings-tavily-upstream-search-path">Search Path</label>
                 <input type="text" id="settings-tavily-upstream-search-path" placeholder="/search">
               </div>
-              <div class="settings-field">
+              <div class="settings-field" data-tavily-upstream-field="true">
                 <label for="settings-tavily-upstream-extract-path">Extract Path</label>
                 <input type="text" id="settings-tavily-upstream-extract-path" placeholder="/extract">
               </div>
-              <div class="settings-field full-width">
+              <div class="settings-field full-width" data-tavily-upstream-field="true">
                 <label for="settings-tavily-upstream-api-key">上游 API key / Gateway token</label>
                 <input type="password" id="settings-tavily-upstream-api-key" placeholder="留空表示保持当前值">
                 <div class="hint" id="settings-tavily-upstream-api-key-hint">未配置</div>
               </div>
             </div>
 
-            <div class="settings-actions">
-              <button type="submit" class="btn btn-primary">保存 Tavily 设置</button>
+            <div class="settings-footer">
+              <div class="settings-footer-copy">
+                <strong>这里决定 Tavily 是本地池还是上游网关。</strong>
+                <span>切换后会立即影响 `/api/search` 与 `/api/extract` 的实际转发行为。</span>
+              </div>
+              <div class="settings-footer-actions">
+                <button type="button" class="btn btn-soft" onclick="testTavilySettings(this)">测试当前连接</button>
+                <button type="submit" class="btn btn-primary">保存 Tavily 设置</button>
+              </div>
             </div>
+            <div class="settings-probe hidden" id="settings-tavily-probe"></div>
             <div class="settings-status hidden" id="settings-tavily-status"></div>
           </form>
         </div>
@@ -109,10 +133,11 @@
           <div class="settings-secret-meta" id="settings-social-meta"></div>
         </div>
         <div class="settings-panel-main">
-          <form onsubmit="saveSocialSettings(event)">
+          <form class="settings-form" onsubmit="saveSocialSettings(event)">
+            <div class="settings-summary-strip" id="settings-social-summary"></div>
             <div class="settings-fields">
               <div class="settings-field">
-                <label for="settings-social-upstream-base-url">上游 Base URL</label>
+                <label for="settings-social-upstream-base-url">搜索上游 Base URL</label>
                 <input type="text" id="settings-social-upstream-base-url" placeholder="https://media.example.com/v1">
                 <div class="hint">真正转发 `/responses` 时使用的上游地址。</div>
               </div>
@@ -127,22 +152,22 @@
                 <div class="hint">当主模型结果太少或请求失败时，自动补一轮的候选模型。</div>
               </div>
               <div class="settings-field">
-                <label for="settings-social-admin-base-url">grok2api 后台地址</label>
+                <label for="settings-social-admin-base-url">后台管理地址</label>
                 <input type="text" id="settings-social-admin-base-url" placeholder="https://media.example.com">
                 <div class="hint">推荐填后台根地址，系统会自动拉 `config` 和 `tokens`。</div>
               </div>
               <div class="settings-field">
-                <label for="settings-social-admin-app-key">grok2api app key</label>
+                <label for="settings-social-admin-app-key">后台管理 app key</label>
                 <input type="password" id="settings-social-admin-app-key" placeholder="留空表示保持当前值">
                 <div class="hint" id="settings-social-admin-app-key-hint">未配置</div>
               </div>
               <div class="settings-field">
-                <label for="settings-social-upstream-api-key">手动上游 API key</label>
+                <label for="settings-social-upstream-api-key">搜索上游 API key</label>
                 <input type="password" id="settings-social-upstream-api-key" placeholder="留空表示保持当前值">
                 <div class="hint" id="settings-social-upstream-api-key-hint">未配置</div>
               </div>
               <div class="settings-field">
-                <label for="settings-social-gateway-token">客户端 token</label>
+                <label for="settings-social-gateway-token">客户端访问 token</label>
                 <input type="password" id="settings-social-gateway-token" placeholder="留空表示保持当前值">
                 <div class="hint" id="settings-social-gateway-token-hint">未配置</div>
               </div>
@@ -180,9 +205,17 @@
               </div>
             </details>
 
-            <div class="settings-actions">
-              <button type="submit" class="btn btn-primary">保存 Social / X 设置</button>
+            <div class="settings-footer">
+              <div class="settings-footer-copy">
+                <strong>优先维护后台接线，再看高级路径。</strong>
+                <span>保存后会刷新 Social 工作台状态、token 来源和兼容路由摘要。</span>
+              </div>
+              <div class="settings-footer-actions">
+                <button type="button" class="btn btn-soft" onclick="testSocialSettings(this)">测试当前连接</button>
+                <button type="submit" class="btn btn-primary">保存 Social / X 设置</button>
+              </div>
             </div>
+            <div class="settings-probe hidden" id="settings-social-probe"></div>
             <div class="settings-status hidden" id="settings-social-status"></div>
           </form>
         </div>

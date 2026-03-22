@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import io
+import sys
 import unittest
+from pathlib import Path
 from urllib.error import HTTPError
 from unittest.mock import patch
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from mysearch.clients import MySearchClient, MySearchHTTPError, RouteDecision
 

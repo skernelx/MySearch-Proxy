@@ -1,0 +1,37 @@
+# 常见工作流
+
+## 1. 本机给 Codex / Claude Code 接入 MySearch
+
+1. 在仓库根目录准备 Python 环境，并优先把 `MYSEARCH_*` 写进宿主配置，而不是先复制 `.env`。来源：README.md:165, README.md:172, skill/README.md:72
+2. 执行根目录 `install.sh`。它会安装 `mysearch/requirements.txt`，继承宿主已有配置，再尝试把 `mysearch` 注册到 Claude Code 和 Codex。来源：install.sh:13, install.sh:74, install.sh:174, install.sh:183
+3. 验收时先看 `mcp list/get`，再跑 `python skill/scripts/check_mysearch.py --health-only` 和基础 smoke test。来源：README.md:193, skill/README.md:148
+
+## 2. 部署 proxy-first 链路
+
+1. 先部署 `proxy/`，这层负责统一接上游 provider、生成 `mysp-` token 并暴露控制台。来源：README.md:200, proxy/README.md:102
+2. 首次进入默认搜索控制台后，顶部 hero 不再单独重复展示“当前工作台”大卡；首屏只保留品牌区、快捷动作和 4 条 provider lane。如果想直接进入操作区，优先用 `进入当前工作台`；如果想看统一客户端接入配置，则用 `查看 MySearch 接入` 跳到独立的 `/mysearch` 页面。来源：proxy/templates/components/_hero.html:25, proxy/templates/components/_hero.html:42, proxy/templates/components/_hero.html:51, proxy/templates/components/_hero.html:77, proxy/static/js/console.js:631
+3. 默认搜索控制台下半区现在固定为 `Workspace Navigator -> 具体工作台`，不再默认把 `MySearch 快速接入` 挂在首页。switcher 卡片只保留工作台名称、状态和 2 个核心指标，次要信息下沉成 badge 与说明，不再显示 `/api/search` 这类具体请求路径；同时它已经改成横向卡阵列，不再一张张纵向堆高页面。`Social Compatibility` 也已经收回到 switcher 区块底部。Tavily 现在不是手动二选一，而是进 `Settings -> Tavily` 看 `auto|pool|upstream` 三态分段控件，保存后前端会同时显示“配置模式 / 当前实际 / 来源”，其中 `auto` 会按“上游凭证优先，其次本地活跃 Tavily key”自动解析；如果你只是导入 Tavily key，默认实际就会落到 API Key 池。Social/X 的 grok2api 或 compatible 配置仍进 `Settings -> Social / X`，而且字段标题现在按职责拆成“搜索上游”和“后台管理”两类，不再把 `Base URL`、后台地址和 app key 混成一组理解。设置中心每个 tab 都带 `settings-summary-strip`、sticky footer 和“测试当前连接”按钮，而且测试结果会直接展开成结构化 probe 卡，不需要自己从一行状态文案里猜请求目标或鉴权来源。来源：proxy/templates/console.html:51, proxy/templates/console.html:61, proxy/templates/components/_settings_modal.html:61, proxy/templates/components/_settings_modal.html:117, proxy/templates/components/_settings_modal.html:218, proxy/static/css/console.css:1061, proxy/static/js/console.js:2262
+4. 具体 provider 页面现在统一先看 `stats + 接线摘要`，再按需展开 `Token 池` 和 `API Key 池` 两个 detail cards；主表已经降成摘要视图，点击任一 token/key 行会打开右侧 `detail-drawer` 查看完整额度、账户层级信息和维护动作。新增的本地筛选条会直接在前端做搜索、筛选和排序，而且已经补到 `失败优先`、`待处理`、`异常优先`、`低额度优先` 这类运维向视角；表格行也可以直接用键盘 `Enter / Space` 打开详情抽屉。需要特别区分的是“本地池统计”和“上游状态”：Tavily 当前实际走 upstream 时，概览优先展示上游 Hikari 的公共摘要，例如活跃 key、耗尽 key、总请求与总剩余额度，本地 Tavily key 会降级成回退库存；Social / X 在接通 grok2api 后台时继续显示完整 token 统计，但如果只有手动上游 key / gateway token，就只展示基础接线可视化，例如上游 key 数、客户端 token 数和可转发状态，不再把后台未接通误显示成一排 0。对于兼容后台的 `/v1/admin/tokens`，控制台现在也会先解包 `{tokens:{...}}`、`{data:{...}}`、`{items:[...]}` 这类响应再做统计，避免后台地址和 app key 都已配置但 token 总数仍错误地显示为 0。初始化顺序仍建议保持“登录 -> 导入 Tavily/Firecrawl/Exa key -> 需要时补 Social/X -> sync usage -> 创建 `mysp-` token”。来源：proxy/templates/console.html:94, proxy/static/js/console.js:845, proxy/static/js/console.js:1268, proxy/static/js/console.js:2631, proxy/static/js/console.js:2718
+5. `MySearch 快速接入` 现在已经独立到 `/mysearch` 页面，不再默认出现在搜索控制台首页，这一页也不再重复展示首页 `summary-strip`。页级标题已经收成 `MySearch 接入台`，模块级标题则用 `统一接入配置`，不再两层都重复 `MySearch 快速接入`。页面内部继续收成“接入配置 / 安装路径 / 通用 Token 管理”三层，而且“一键配置”内部再拆成左侧可视化 readiness 区和右侧配置区，不再让 route 小卡片和 `.env`/说明混在一列里。`quickstart-route-strip` 会根据 Tavily `effective_mode`、Exa / Firecrawl key 状态和 Social / X 接线情况，动态显示当前 provider readiness；`quickstart-install-strip` 则把“创建通用 token → 复制 `.env` → ./install.sh”压成当前最短安装路径，并额外提供 `复制 .env 并定位命令` 的组合动作；旧版更直观的默认安装形态也通过 `quickstart-install-meta` 补回来了，直接展示 `stdio / streamable-http`。生成的 `.env` 里也会把“当前路由状态”写进去。客户端侧仍只保留 `MYSEARCH_PROXY_BASE_URL` 与 `MYSEARCH_PROXY_API_KEY`，不再把 provider key 散落到每台机器；`MySearch 通用 Token` 摘要表也补上了本地搜索和排序。来源：README.md:79, proxy/templates/mysearch.html:45, proxy/static/js/console.js:1433, proxy/static/js/console.js:1486, proxy/static/js/console.js:1546, proxy/static/js/console.js:1695
+6. 默认首页的 `summary-strip` 现在更偏“控制面概览”而不是“把所有 provider 细节都缩一遍”。它只展示 `当前工作台 / 已接通工作台 / Provider 代理 Token / 今日调用 / 本月调用 / MySearch Token`。其中 `Provider 代理 Token` 会按工作台当前是否走本地代理池动态统计，例如 Tavily 或 Social / X 一旦切到上游 Gateway/兼容后台，就会从这项里剔除；Exa / Firecrawl 继续按本地 provider token 池计入。这样首页摘要只表达项目拓扑和控制面状态，不再重复展示工作台内部已经会单独展示的上游额度、本地 API Key 或 `Social Chat` 细节。来源：proxy/static/js/console.js:2777
+7. 保存设置、测试连接、复制配置和同步额度仍统一走页面右下角 toast；删除 token/key 这类危险动作现在不再用浏览器原生确认框，而是统一走 `app-dialog`；控制台范围内也已经没有原生 `select`，Tavily 工作模式改成了自定义 `mode-switch` 分段控件；左侧 `Social Compatibility` 与右侧 `Social / X 接入` 也都改成更摘要优先的结构，长英文值不再直接用大字号 value 顶满卡片；provider 的 token/key 摘要表则会用 `danger / warn / busy / off` 行态底色优先标出同步错误、低额度、异常活跃和停用状态，并在表格上方用 `table-legend` 直接给出图例；右侧 `detail-drawer` 的底部动作也改成“维护动作 / 危险动作”两组，删除类操作不再和普通维护动作并排。登录页也已经和 dashboard 收成同一套视觉语言，补了 `auth-meta` 元信息卡；登录、设置保存、设置测试、额度同步、创建 token、添加/导入 key 这些主操作现在都会显示按钮级 loading / success / error 过渡，而且共享同一个 `runWithBusyButton()`，会自动给 busy 态保留最小时长并避免在刷新后把 success/error 反馈闪到错误节点。进一步地，控制台现在已经把频繁操作改成“局部刷新而不是全量重绘”，并补上了 `mode-switch / mini-switch / settings-tab` 的方向键导航、toast live region、dialog 焦点回收与 focus trap；登录成功后 dashboard 仍会做一轮轻量 staged reveal，而在 `prefers-reduced-motion` 下这些动效会自动压平。主题切换也已经扩成 `浅色 / 深色 / 自动` 三态，`自动` 会按打开页面那台机器的本地时区和本地时间切换实际主题，不依赖服务端所在系统或 Docker 容器时区。来源：proxy/templates/console.html:97, proxy/templates/console.html:114, proxy/templates/console.html:134, proxy/static/js/console.js:19, proxy/static/js/console.js:108, proxy/static/js/console.js:178, proxy/static/js/console.js:644, proxy/static/js/console.js:653, proxy/static/js/console.js:808, proxy/static/js/console.js:3123, proxy/static/js/console.js:3495, proxy/static/css/console.css:118, proxy/static/css/console.css:1008, proxy/static/css/console.css:1245, proxy/static/css/console.css:2507, proxy/static/css/console.css:2908
+
+## 3. 接入 OpenClaw
+
+1. OpenClaw 正式配置优先写 `openclaw.json` 的 `skills.entries.mysearch.env`，不要把 secret 直接写进仓库文件。来源：README.md:94, openclaw/README.md:65, openclaw/README.md:93
+2. 本地替换 bundle 时，走 `openclaw/` 自带安装脚本；从 ClawHub 安装时，重点仍然是注入 env，而不是手改 bundle。来源：openclaw/README.md:55, openclaw/README.md:74
+3. 验收顺序是 `health` -> `search --mode web` -> 需要时补 `docs` / `social`。来源：openclaw/README.md:121
+
+## 4. 排查搜索行为
+
+1. 先跑 `mysearch_health`，确认 provider 是否可用，而不是只看 key 有没有填。来源：mysearch/server.py:156, README.md:105
+2. 再看 `route` 与 `route_debug`，判断是显式 provider、生效的 intent/strategy，还是 blended/hybrid 路由。来源：mysearch/clients.py:359, mysearch/clients.py:651
+3. 文档类查询要分清“页面发现”和“正文抓取”是两个阶段；正文异常先查 Firecrawl，再看 Tavily/Exa fallback。来源：mysearch/clients.py:1023, mysearch/clients.py:677
+4. 如果问题出在团队共享链路，而不是本地 runtime，就把排查重心切到 `proxy/` 的 key 池、token、usage sync 和 social gateway 配置。遇到“后台地址和 app key 都已配置，但 Social / X token 统计还是 0”时，先确认上游 `/v1/admin/tokens` 返回结构是否带 envelope；当前控制台已经兼容 `{tokens:{...}}`、`{data:{...}}`、`{items:[...]}`，所以这种现象通常说明进程还没重启到新代码，或者后台返回的并不是这组 admin 语义。来源：proxy/README.md:27, proxy/server.py:189, proxy/server.py:736, proxy/database.py:179
+
+## 5. 什么时候改哪里
+
+- 改 prompt、安装话术、AI 调用顺序：看 `skill/`
+- 改 runtime 参数、provider 路由、search/extract/research 组合：看 `mysearch/`
+- 改统一 token、代理 API、控制台和持久化：看 `proxy/`
+- 改 OpenClaw bundle：看 `openclaw/`

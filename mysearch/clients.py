@@ -6,10 +6,11 @@ import copy
 import hashlib
 import json
 import re
+import sys
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass as _dataclass
 from datetime import date, datetime, time as dt_time, timezone
 from typing import Any, Callable, Literal
 from urllib.error import HTTPError, URLError
@@ -18,6 +19,12 @@ from urllib.request import Request, urlopen
 
 from mysearch.config import MySearchConfig, ProviderConfig
 from mysearch.keyring import MySearchKeyRing
+
+
+def dataclass(*args, **kwargs):
+    if sys.version_info < (3, 10):
+        kwargs.pop("slots", None)
+    return _dataclass(*args, **kwargs)
 
 
 SearchMode = Literal["auto", "web", "news", "social", "docs", "research", "github", "pdf"]

@@ -7,10 +7,17 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%230f172a'/%3E%3Cpath d='M13 14h8l6.5 11L34 14h8L31.5 34h-7L13 14Z' fill='%23f8fafc'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="{{ url_for('static', path='/css/console.css') }}">
 </head>
-<body>
+<body class="console-body">
 
 <div id="login-box" class="auth card{% if initial_authenticated %} hidden{% endif %}">
+  <div class="auth-orb auth-orb-a"></div>
+  <div class="auth-orb auth-orb-b"></div>
   <div class="auth-kicker">MySearch Proxy</div>
+  <div class="auth-badges">
+    <span class="auth-badge">Unified Proxy</span>
+    <span class="auth-badge">Provider Pools</span>
+    <span class="auth-badge">Team Ready</span>
+  </div>
   <h2>Search Infrastructure Console</h2>
   <p>把 Tavily、Exa、Firecrawl 和 Social / X 接入放进同一块工作台里，适合你自己用，也适合直接公开给团队或社区部署。</p>
   <form class="stack" onsubmit="doLogin(event)">
@@ -18,6 +25,20 @@
     <input type="password" id="pwd-input" placeholder="输入管理密码" autocomplete="current-password">
     <button type="submit" class="btn btn-primary" id="login-submit">进入控制台</button>
   </form>
+  <div class="auth-meta">
+    <div class="auth-meta-card">
+      <div class="label">统一入口</div>
+      <strong>MySearch Token</strong>
+    </div>
+    <div class="auth-meta-card">
+      <div class="label">Provider</div>
+      <strong>Tavily / Exa / Firecrawl / Social</strong>
+    </div>
+    <div class="auth-meta-card">
+      <div class="label">控制面</div>
+      <strong>Key 池 · 路由 · 额度</strong>
+    </div>
+  </div>
   <p id="login-err" class="login-error hidden"></p>
 </div>
 
@@ -27,55 +48,88 @@
 
     <section class="summary-strip" id="global-summary"></section>
 
-    <section class="credit-strip">
-      <div class="credit-copy">
-        <span class="credit-kicker">Powered by grok2api</span>
-        <strong>Social / X 工作台当前默认调用 grok2api</strong>
-        <p>这部分能力基于 grok2api 提供的兼容接口和后台 token 状态完成接线。MySearch 的 Social / X 路由在这里向 grok2api 项目致谢，并保留它作为默认兼容实现来源。</p>
-        <a
-          class="credit-link mono"
-          href="https://github.com/chenyme/grok2api"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          github.com/chenyme/grok2api
-        </a>
-      </div>
-      <div class="credit-meta">
-        <div class="credit-pill">
-          <div class="label">当前用途</div>
-          <div class="value">X Search Compatible</div>
+    <div class="dashboard-flow">
+      <section class="switcher-shell card">
+        <div class="switcher-head">
+          <div>
+            <span class="switcher-eyebrow">Workspace Navigator</span>
+            <h2>一屏切换不同搜索引擎工作台</h2>
+            <p>先用这一屏判断当前该处理哪个工作台，再在下面展开实际的 Token、Key、额度与接线细节。</p>
+          </div>
+          <div class="switcher-note" id="switcher-note">已记住上次打开的工作台</div>
         </div>
-        <div class="credit-pill">
-          <div class="label">感谢项目</div>
-          <div class="value">grok2api</div>
-        </div>
-      </div>
-    </section>
+        <section class="service-switcher" id="service-switcher"></section>
 
-    <section class="card mysearch-shell" id="mysearch-quickstart"></section>
+        <section class="credit-strip credit-strip-inline">
+          <div class="credit-copy">
+            <span class="credit-kicker">Social Compatibility</span>
+            <strong>Social / X 工作台默认兼容 grok2api</strong>
+            <p>这部分能力基于 grok2api 的兼容接口与后台 token 状态完成接线。控制台保留它作为默认兼容来源，同时允许你切到其他 xAI-compatible 上游。</p>
+            <a
+              class="credit-link mono"
+              href="https://github.com/chenyme/grok2api"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              github.com/chenyme/grok2api
+            </a>
+          </div>
+          <div class="credit-meta">
+            <div class="credit-pill">
+              <div class="label">当前用途</div>
+              <div class="value">X Search</div>
+              <div class="credit-pill-note mono">compatible router</div>
+            </div>
+            <div class="credit-pill">
+              <div class="label">默认实现</div>
+              <div class="value">grok2api</div>
+              <div class="credit-pill-note">后台自动继承</div>
+            </div>
+          </div>
+        </section>
+      </section>
 
-    <section class="switcher-shell card">
-      <div class="switcher-head">
-        <div>
-          <span class="switcher-eyebrow">Workspace Switcher</span>
-          <h2>一屏切换不同搜索引擎工作台</h2>
-          <p>选择要查看的工作台，下面会展开对应服务的 Key、Token、额度和接入配置。</p>
-        </div>
-        <div class="switcher-note" id="switcher-note">已记住上次打开的工作台</div>
-      </div>
-      <section class="service-switcher" id="service-switcher"></section>
-    </section>
-
-    <div id="services-root"></div>
+      <div id="services-root" class="services-root"></div>
+    </div>
   </div>
 
-  {% include "components/_settings_modal.html" %}
+	  {% include "components/_settings_modal.html" %}
 
-<script>
-const INITIAL_AUTHENTICATED = {{ "true" if initial_authenticated else "false" }};
-</script>
-<script src="{{ url_for('static', path='/js/console.js') }}"></script>
-<div id="toast-root" class="toast-root"></div>
-</body>
-</html>
+    <div id="detail-drawer" class="detail-drawer-shell hidden">
+      <div class="detail-drawer-backdrop" onclick="closeDetailDrawer()"></div>
+      <aside class="detail-drawer card" role="dialog" aria-modal="true" aria-labelledby="detail-drawer-title">
+        <div class="detail-drawer-head">
+          <div>
+            <div class="detail-drawer-kicker" id="detail-drawer-kicker">Details</div>
+            <h3 id="detail-drawer-title">查看详情</h3>
+            <p id="detail-drawer-subtitle">这里会显示当前条目的完整额度、统计和维护动作。</p>
+          </div>
+          <button class="btn btn-soft btn-sm" type="button" data-overlay-autofocus="true" onclick="closeDetailDrawer()">关闭</button>
+        </div>
+        <div class="detail-drawer-summary" id="detail-drawer-summary"></div>
+        <div class="detail-drawer-body" id="detail-drawer-body"></div>
+        <div class="detail-drawer-actions" id="detail-drawer-actions"></div>
+      </aside>
+    </div>
+
+    <div id="app-dialog" class="app-dialog-shell hidden">
+      <div class="app-dialog-backdrop" onclick="closeAppDialog(false)"></div>
+      <div class="app-dialog card" role="alertdialog" aria-modal="true" aria-labelledby="app-dialog-title">
+        <div class="app-dialog-head">
+          <div class="app-dialog-kicker" id="app-dialog-kicker">Action Required</div>
+          <h3 id="app-dialog-title">请确认操作</h3>
+        </div>
+        <p class="app-dialog-message" id="app-dialog-message">确认后会继续执行当前操作。</p>
+        <div class="app-dialog-actions" id="app-dialog-actions"></div>
+      </div>
+    </div>
+
+    <div id="toast-root" class="toast-root" role="status" aria-live="polite" aria-atomic="false"></div>
+
+	<script>
+	const INITIAL_AUTHENTICATED = {{ "true" if initial_authenticated else "false" }};
+  window.PAGE_KIND = "console";
+	</script>
+	<script src="{{ url_for('static', path='/js/console.js') }}"></script>
+	</body>
+	</html>

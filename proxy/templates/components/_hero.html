@@ -1,21 +1,20 @@
 <header class="hero card">
+  <div class="hero-orb hero-orb-a"></div>
+  <div class="hero-orb hero-orb-b"></div>
+  <div class="hero-grid"></div>
+
   <div class="hero-stack">
     <div class="hero-topbar">
-      <div class="hero-tags">
-        <span class="hero-tag">
-          <svg class="icon w-3 h-3 mr-1 inline-block" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          统一搜索入口
-        </span>
-        <span class="hero-tag">
-          <svg class="icon w-3 h-3 mr-1 inline-block" viewBox="0 0 24 24"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5H5a2 2 0 0 0-2-2z"/></svg>
-          官方 / 兼容双接入
-        </span>
-        <span class="hero-tag">
-          <svg class="icon w-3 h-3 mr-1 inline-block" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
-          MCP + Proxy + Skill
-        </span>
+      <div class="hero-brand">
+        <span class="hero-brand-kicker">Search Operations Desk</span>
+        <div class="hero-brand-line"></div>
+        <span class="hero-brand-copy">MySearch Proxy</span>
       </div>
       <div class="hero-actions">
+        <button class="user-btn theme-btn" type="button" onclick="toggleTheme()" id="theme-toggle">
+          <svg class="icon w-4 h-4 mr-1 inline-block" viewBox="0 0 24 24"><path d="M12 3v3"/><path d="M12 18v3"/><path d="M4.22 4.22 6.34 6.34"/><path d="m17.66 17.66 2.12 2.12"/><path d="M3 12h3"/><path d="M18 12h3"/><path d="m4.22 19.78 2.12-2.12"/><path d="m17.66 6.34 2.12-2.12"/><circle cx="12" cy="12" r="4"/></svg>
+          <span id="theme-toggle-label">夜间模式</span>
+        </button>
         <button class="user-btn settings-btn" type="button" onclick="openSettingsModal()">
           <svg class="icon w-4 h-4 mr-1 inline-block" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
           控制台设置
@@ -25,36 +24,51 @@
 
     <div class="hero-main">
       <div class="hero-copy">
-        <h1>把搜索基础设施<br>做成真正可交付的工作台</h1>
-        <p class="hero-intro">MySearch 把 Tavily、Exa、Firecrawl 和 Social / X 统一成一套可被 Codex、Claude Code 和团队 Agent 直接调用的搜索入口。使用者拿到后，不需要自己维护多套 provider、兼容网关和结果结构，也不需要每次手动判断这一轮该用网页搜索、正文抓取还是社交舆情。</p>
+        <div class="hero-pill-row">
+          <span class="hero-tag">
+            <svg class="icon w-3 h-3 mr-1 inline-block" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"></circle><path d="m20 20-3.5-3.5"></path><path d="M11 8v6"></path><path d="M8 11h6"></path></svg>
+            统一搜索入口
+          </span>
+          <span class="hero-tag">
+            <svg class="icon w-3 h-3 mr-1 inline-block" viewBox="0 0 24 24"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5H5a2 2 0 0 0-2-2z"/></svg>
+            官方 / Gateway 双接入
+          </span>
+          <span class="hero-tag">
+            <svg class="icon w-3 h-3 mr-1 inline-block" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+            MCP + Proxy + Skill
+          </span>
+        </div>
 
-        
-        <aside class="hero-focus" id="hero-focus">
-          <div class="hero-focus-kicker">当前工作台</div>
-          <div class="hero-focus-name">等待数据</div>
-          <div class="hero-focus-status">尚未同步</div>
-          <div class="hero-focus-desc">刷新后会显示当前工作台的模式、额度、Token 状态和最近同步信息。</div>
-          <div class="hero-focus-actions">
-            <button type="button" class="btn btn-ghost" onclick="scrollToCurrentPanel()">定位当前工作台</button>
-            <button type="button" class="btn btn-ghost" onclick="scrollToQuickstart()">MySearch 接入</button>
-          </div>
-        </aside>
+        <div class="hero-heading-shell">
+          <div class="hero-heading-kicker">Infrastructure-grade console</div>
+          <h1>
+            <span class="hero-heading-line">把搜索控制台做成</span>
+            <span class="hero-heading-line hero-heading-accent">真正可交付的基础设施</span>
+          </h1>
+        </div>
+        <p class="hero-intro">MySearch 把 Tavily、Exa、Firecrawl 和 Social / X 统一成同一块运维工作台。你在这里管理的不是零散 provider，而是一套可直接交给 Codex、Claude Code 和团队 Agent 使用的搜索控制面。</p>
+
+        <div class="hero-command-row">
+          <button type="button" class="btn btn-primary" onclick="scrollToCurrentPanel()">进入当前工作台</button>
+          <button type="button" class="btn btn-soft" onclick="window.location.href='/mysearch'">查看 MySearch 接入</button>
+        </div>
+
         <div class="hero-usage-grid">
           <div class="hero-usage-card">
-            <strong>统一入口</strong>
-            <span>网页发现、正文抓取、社交舆情走同一套接线方式。</span>
-          </div>
-          <div class="hero-usage-card">
-            <strong>Exa 工作区</strong>
-            <span>把 Exa 独立成可发 Token、可管 Key、可直接代理调用的新栏目。</span>
-          </div>
-          <div class="hero-usage-card">
             <strong>统一运维</strong>
-            <span>Key 池、Token、额度同步和团队共享入口放在同一个控制台里。</span>
+            <span>把 Key 池、Token、额度同步和团队共享入口放进同一套控制面，不再靠 README 记忆操作。</span>
           </div>
           <div class="hero-usage-card">
-            <strong>统一兼容</strong>
-            <span>官方 API 和自定义 compatible 聚合服务都能接，不锁死单一后端。</span>
+            <strong>双模式接入</strong>
+            <span>官方 API、上游 Gateway 和 compatible social router 都可以在同一个界面里切换和核对。</span>
+          </div>
+          <div class="hero-usage-card">
+            <strong>摘要优先</strong>
+            <span>先看当前工作台状态和剩余额度，再下钻到 Token、Key、设置和调用示例，避免首屏变成长表格。</span>
+          </div>
+          <div class="hero-usage-card">
+            <strong>直接交付</strong>
+            <span>控制台生成的配置信息可以直接喂给 MySearch MCP、OpenClaw 或其他客户端，不需要手动拼接变量。</span>
           </div>
         </div>
       </div>
@@ -62,24 +76,24 @@
 
     <section class="hero-lanes">
       <article class="hero-lane" data-service="tavily">
-        <span class="hero-lane-kicker">Router</span>
-        <strong>Tavily 做发现</strong>
-        <p>适合新闻、快速 answer、网页线索收集，放在 MySearch 的第一层路由里。</p>
+        <span class="hero-lane-kicker">Discovery</span>
+        <strong>Tavily 做网页发现</strong>
+        <p>适合新闻、快速 answer 和基础搜索入口，也支持切到上游 Tavily Gateway。</p>
       </article>
       <article class="hero-lane" data-service="exa">
-        <span class="hero-lane-kicker">Search</span>
-        <strong>Exa 做网页发现</strong>
-        <p>适合补 Tavily 之外的网页搜索入口，这里收成独立 Key 池、Token 池和代理端点。</p>
+        <span class="hero-lane-kicker">Expansion</span>
+        <strong>Exa 做补充搜索</strong>
+        <p>当你需要额外的网页搜索入口时，这里用独立 Key 池、Token 池和代理端点承接。</p>
       </article>
       <article class="hero-lane" data-service="firecrawl">
-        <span class="hero-lane-kicker">Depth</span>
-        <strong>Firecrawl 做抓取</strong>
-        <p>文档站、GitHub、PDF、pricing 和 changelog 这类正文内容，交给 Firecrawl 更稳。</p>
+        <span class="hero-lane-kicker">Extraction</span>
+        <strong>Firecrawl 做正文抓取</strong>
+        <p>正文页、文档站、PDF 和结构化抽取放在这里统一管理 credits 与抓取调用。</p>
       </article>
       <article class="hero-lane" data-service="social">
-        <span class="hero-lane-kicker">Social</span>
-        <strong>Social / X 做舆情</strong>
-        <p>兼容 grok2api 和 xAI-compatible 搜索，把 X 结果统一整理成可直接消费的结构。</p>
+        <span class="hero-lane-kicker">Signal</span>
+        <strong>Social / X 做舆情路由</strong>
+        <p>兼容 grok2api 和 xAI-compatible 搜索，对外统一成同一条 `/social/search` 链路。</p>
       </article>
     </section>
   </div>

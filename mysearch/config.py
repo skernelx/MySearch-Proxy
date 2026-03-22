@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+import sys
+from dataclasses import dataclass as _dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -11,6 +12,12 @@ try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - py310 fallback
     tomllib = None  # type: ignore[assignment]
+
+
+def dataclass(*args, **kwargs):
+    if sys.version_info < (3, 10):
+        kwargs.pop("slots", None)
+    return _dataclass(*args, **kwargs)
 
 
 MODULE_DIR = Path(__file__).resolve().parent

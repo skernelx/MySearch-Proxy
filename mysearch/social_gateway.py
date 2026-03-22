@@ -66,7 +66,14 @@ SOCIAL_SEARCH_MODEL = MODEL
 
 http_client = httpx.AsyncClient(timeout=60)
 state_cache: dict[str, Any] = {"expires_at": 0.0, "value": None}
-state_lock = asyncio.Lock()
+state_lock: asyncio.Lock | None = None
+
+
+def get_state_lock() -> asyncio.Lock:
+    global state_lock
+    if state_lock is None:
+        state_lock = asyncio.Lock()
+    return state_lock
 
 
 @asynccontextmanager
@@ -152,12 +159,27 @@ def mask_secret(value: str) -> str:
     return f"{value[:6]}***{value[-4:]}"
 
 
+def unwrap_social_tokens_payload(tokens_payload: Any) -> Any:
+    if isinstance(tokens_payload, dict):
+        for key_name in ("tokens", "data", "items", "result", "pools"):
+            candidate = tokens_payload.get(key_name)
+            if isinstance(candidate, dict):
+                return candidate
+            if isinstance(candidate, list):
+                return {"default": candidate}
+        return tokens_payload
+    if isinstance(tokens_payload, list):
+        return {"default": tokens_payload}
+    return {}
+
+
 def flatten_social_tokens(tokens_payload: Any) -> list[dict[str, Any]]:
     flat: list[dict[str, Any]] = []
-    if not isinstance(tokens_payload, dict):
+    normalized = unwrap_social_tokens_payload(tokens_payload)
+    if not isinstance(normalized, dict):
         return flat
 
-    for pool_name, items in tokens_payload.items():
+    for pool_name, items in normalized.items():
         if not isinstance(items, list):
             continue
         for item in items:
@@ -284,7 +306,7 @@ async def resolve_gateway_state(force: bool = False) -> dict[str, Any]:
     if not force and cached and state_cache.get("expires_at", 0) > now:
         return cached
 
-    async with state_lock:
+    async with get_state_lock():
         now = time.time()
         cached = state_cache.get("value")
         if not force and cached and state_cache.get("expires_at", 0) > now:
