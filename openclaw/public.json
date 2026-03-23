@@ -1,5 +1,6 @@
 {
   "name": "MySearch",
+  "version": "0.1.11",
   "slug": "mysearch",
   "description": "Default search skill for OpenClaw. Aggregates Tavily, Firecrawl, Exa, and optional X/social search behind one proxy-first path.",
   "author": "skernelx",

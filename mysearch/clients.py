@@ -1365,7 +1365,7 @@ class MySearchClient:
                 return RouteDecision(
                     provider="tavily",
                     reason="显式指定 Tavily",
-                    tavily_topic="news" if mode == "news" else "general",
+                    tavily_topic="news" if mode == "news" or intent in {"news", "status"} else "general",
                 )
             if provider == "firecrawl":
                 return RouteDecision(
@@ -1518,16 +1518,26 @@ class MySearchClient:
             )
 
         if mode == "research":
-            if not self._provider_can_serve(self.config.tavily) and self._provider_can_serve(
-                self.config.exa
-            ):
+            if self._provider_can_serve(self.config.tavily):
+                return RouteDecision(
+                    provider="tavily",
+                    reason="research 模式先用 Tavily 做发现，再按策略决定是否扩展验证",
+                    tavily_topic="general",
+                )
+            if self._provider_can_serve(self.config.exa):
                 return RouteDecision(
                     provider="exa",
                     reason="Tavily 未配置，research 发现阶段回退到 Exa",
                 )
+            if self._provider_can_serve(self.config.firecrawl):
+                return RouteDecision(
+                    provider="firecrawl",
+                    reason="Tavily / Exa 未配置，research 发现阶段回退到 Firecrawl",
+                    firecrawl_categories=self._firecrawl_categories(mode, intent),
+                )
             return RouteDecision(
                 provider="tavily",
-                reason="research 模式先用 Tavily 做发现，再按策略决定是否扩展验证",
+                reason="research 模式默认走 Tavily（无可用替代）",
                 tavily_topic="general",
             )
 
@@ -3975,18 +3985,27 @@ class MySearchClient:
         return []
 
     def _looks_like_news_query(self, query_lower: str) -> bool:
-        keywords = [
+        # 中文关键词：直接 substring 匹配
+        cn_keywords = ["刚刚", "最新", "新闻", "动态"]
+        if any(kw in query_lower for kw in cn_keywords):
+            return True
+        # 英文关键词：排除常见技术搭配的误判
+        # "breaking changes" / "latest version" 等不是新闻查询
+        tech_negatives = [
+            "breaking change", "breaking update",
+            "latest version", "latest release", "latest docs",
+            "latest commit", "latest tag",
+        ]
+        if any(neg in query_lower for neg in tech_negatives):
+            return False
+        en_keywords = [
             "latest",
             "breaking",
             "news",
             "today",
             "this week",
-            "刚刚",
-            "最新",
-            "新闻",
-            "动态",
         ]
-        return any(keyword in query_lower for keyword in keywords)
+        return any(keyword in query_lower for keyword in en_keywords)
 
     def _looks_like_status_query(self, query_lower: str) -> bool:
         keywords = [
