@@ -14,7 +14,7 @@ from dataclasses import dataclass as _dataclass
 from datetime import date, datetime, time as dt_time, timezone
 from typing import Any, Callable, Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from mysearch.config import MySearchConfig, ProviderConfig
@@ -2743,6 +2743,7 @@ class MySearchClient:
         to_date: str | None,
         include_x_images: bool,
         include_x_videos: bool,
+        model: str | None = None,
     ) -> dict[str, Any]:
         tools: list[dict[str, Any]] = []
         if "web" in sources:
@@ -2774,7 +2775,7 @@ class MySearchClient:
 
         augmented_query = f"{query}\n\nReturn up to {max_results} relevant results with concise sourcing."
         return {
-            "model": self.config.xai_model,
+            "model": (model or self.config.xai_model).strip(),
             "input": [
                 {
                     "role": "user",
@@ -3656,13 +3657,13 @@ class MySearchClient:
         provider: ProviderConfig,
         method: str,
         path: str,
-        payload: dict[str, Any],
+        payload: dict[str, Any] | None,
         key: str,
         base_url: str | None = None,
         timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         headers: dict[str, str] = {}
-        body = dict(payload)
+        body = dict(payload or {})
 
         if provider.auth_mode == "bearer":
             token = key if not provider.auth_scheme else f"{provider.auth_scheme} {key}"
@@ -3675,7 +3676,9 @@ class MySearchClient:
         url = f"{(base_url or provider.base_url)}{path}"
         headers.setdefault("Content-Type", "application/json")
         headers.setdefault("User-Agent", "MySearch/0.2")
-        request_body = json.dumps(body).encode("utf-8")
+        request_body = None
+        if method.upper() != "GET":
+            request_body = json.dumps(body).encode("utf-8")
         request = Request(
             url,
             data=request_body,
@@ -3716,6 +3719,106 @@ class MySearchClient:
                 url=url,
             )
         return data
+
+    def _request_text(
+        self,
+        *,
+        url: str,
+        timeout_seconds: int | None = None,
+    ) -> tuple[int, str]:
+        request = Request(
+            url,
+            headers={
+                "User-Agent": "MySearch/0.2",
+                "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+            },
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=timeout_seconds or self.config.timeout_seconds) as response:
+                return response.status, response.read().decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8", errors="replace")
+        except (URLError, OSError) as exc:
+            raise MySearchError(str(exc)) from exc
+
+    def _xai_probe_model(self) -> str:
+        return "grok-4.1-fast"
+
+    def _derive_root_health_base_url(self, provider: ProviderConfig) -> str:
+        candidate = (
+            provider.base_url_for("social_search")
+            or provider.base_url_for("social_health")
+            or provider.base_url
+        )
+        parsed = urlparse(str(candidate or "").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return str(candidate or "").strip().rstrip("/")
+        return urlunparse((parsed.scheme, parsed.netloc, "", "", "", "")).rstrip("/")
+
+    def _probe_xai_official_status_page(self, timeout_seconds: int) -> None:
+        status_url = "https://status.x.ai/"
+        status_code, response_text = self._request_text(
+            url=status_url,
+            timeout_seconds=timeout_seconds,
+        )
+        if status_code >= 400:
+            raise MySearchHTTPError(
+                provider="xai",
+                status_code=status_code,
+                detail=f"status.x.ai returned HTTP {status_code}",
+                url=status_url,
+            )
+
+        lowered = " ".join(response_text.lower().split())
+        if "all systems operational" in lowered:
+            return
+
+        matches = re.findall(
+            r"api(?:\s*\([^)]*\))?[^a-z]{0,40}(available|operational|degraded|outage|unavailable|disrupted)",
+            lowered,
+        )
+        if matches:
+            negative = {"degraded", "outage", "unavailable", "disrupted"}
+            if any(item in negative for item in matches):
+                raise MySearchError(
+                    "status.x.ai reports xAI API is not fully available"
+                )
+            return
+
+        if "api" in lowered and "available" in lowered:
+            return
+
+        raise MySearchError("unable to determine xAI API status from status.x.ai")
+
+    def _probe_xai_official_via_responses(
+        self,
+        provider: ProviderConfig,
+        key: str,
+        timeout_seconds: int,
+    ) -> None:
+        fallback_timeout_seconds = min(self.config.timeout_seconds, 20)
+        self._request_json(
+            provider=provider,
+            method="POST",
+            path=provider.path("responses"),
+            payload=self._build_xai_responses_payload(
+                query="openai",
+                sources=["x"],
+                max_results=1,
+                include_domains=None,
+                exclude_domains=None,
+                allowed_x_handles=None,
+                excluded_x_handles=None,
+                from_date=None,
+                to_date=None,
+                include_x_images=False,
+                include_x_videos=False,
+                model=self._xai_probe_model(),
+            ),
+            key=key,
+            timeout_seconds=max(timeout_seconds, fallback_timeout_seconds),
+        )
 
     def _probe_provider_status(
         self,
@@ -3772,6 +3875,46 @@ class MySearchClient:
             }
         return result
 
+    def _probe_xai_compatible_gateway(self, provider: ProviderConfig, key: str, timeout_seconds: int) -> None:
+        health_path = "/health"
+        health_base_url = self._derive_root_health_base_url(provider)
+        try:
+            payload = self._request_json(
+                provider=provider,
+                method="GET",
+                path=health_path,
+                payload=None,
+                key=key,
+                base_url=health_base_url,
+                timeout_seconds=timeout_seconds,
+            )
+            if isinstance(payload, dict) and payload.get("ok") is False:
+                detail = (
+                    payload.get("error")
+                    or payload.get("detail")
+                    or "social/X gateway health probe reported unavailable"
+                )
+                raise MySearchError(str(detail))
+            return
+        except (MySearchHTTPError, MySearchError):
+            pass
+
+        fallback_timeout_seconds = min(self.config.timeout_seconds, 20)
+        self._request_json(
+            provider=provider,
+            method="POST",
+            path=provider.path("social_search"),
+            payload={
+                "query": "openai",
+                "source": "x",
+                "max_results": 1,
+                "model": self._xai_probe_model(),
+            },
+            key=key,
+            base_url=provider.base_url_for("social_search"),
+            timeout_seconds=fallback_timeout_seconds,
+        )
+
     def _probe_provider_request(self, provider: ProviderConfig, key: str) -> None:
         timeout_seconds = min(self.config.timeout_seconds, 10)
         if provider.name == "tavily":
@@ -3819,40 +3962,24 @@ class MySearchClient:
             return
         if provider.name == "xai":
             if provider.search_mode == "compatible":
-                self._request_json(
+                self._probe_xai_compatible_gateway(provider, key, timeout_seconds)
+                return
+            try:
+                self._probe_xai_official_status_page(timeout_seconds=timeout_seconds)
+            except MySearchError as exc:
+                if "not fully available" in str(exc):
+                    raise
+                self._probe_xai_official_via_responses(
                     provider=provider,
-                    method="POST",
-                    path=provider.path("social_search"),
-                    payload={
-                        "query": "openai",
-                        "source": "x",
-                        "max_results": 1,
-                    },
                     key=key,
-                    base_url=provider.base_url_for("social_search"),
                     timeout_seconds=timeout_seconds,
                 )
-                return
-            self._request_json(
-                provider=provider,
-                method="POST",
-                path=provider.path("responses"),
-                payload=self._build_xai_responses_payload(
-                    query="openai",
-                    sources=["x"],
-                    max_results=1,
-                    include_domains=None,
-                    exclude_domains=None,
-                    allowed_x_handles=None,
-                    excluded_x_handles=None,
-                    from_date=None,
-                    to_date=None,
-                    include_x_images=False,
-                    include_x_videos=False,
-                ),
-                key=key,
-                timeout_seconds=timeout_seconds,
-            )
+            except MySearchHTTPError as exc:
+                self._probe_xai_official_via_responses(
+                    provider=provider,
+                    key=key,
+                    timeout_seconds=timeout_seconds,
+                )
             return
 
     def _summarize_route_error(self, error_text: str) -> str:

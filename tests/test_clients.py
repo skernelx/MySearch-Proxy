@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from mysearch.clients import MySearchClient, MySearchHTTPError, RouteDecision
+from mysearch.clients import MySearchClient, MySearchError, MySearchHTTPError, RouteDecision
 
 
 class _FakeResponse:
@@ -88,6 +88,105 @@ class MySearchClientTests(unittest.TestCase):
         self.assertEqual(payload["providers"]["tavily"]["live_status"], "auth_error")
         self.assertIn("deactivated", payload["providers"]["tavily"]["live_error"])
         self.assertEqual(payload["providers"]["firecrawl"]["live_status"], "ok")
+
+    def test_xai_compatible_health_probe_uses_root_health_endpoint(self) -> None:
+        client = MySearchClient()
+        provider = client.config.xai
+        provider.search_mode = "compatible"
+        provider.default_paths["social_search"] = "/social/search"
+        provider.default_paths["social_health"] = "/social/health"
+        provider.alternate_base_urls["social_search"] = "http://gateway.example/v1"
+        provider.alternate_base_urls["social_health"] = "http://gateway.example/v1"
+        calls: list[dict[str, object]] = []
+
+        def fake_request_json(**kwargs):  # type: ignore[no-untyped-def]
+            calls.append(kwargs)
+            return {"status": "ok"}
+
+        client._request_json = fake_request_json  # type: ignore[method-assign]
+
+        client._probe_provider_request(provider, "gateway-token")
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["method"], "GET")
+        self.assertEqual(calls[0]["path"], "/health")
+        self.assertEqual(calls[0]["base_url"], "http://gateway.example")
+
+    def test_xai_compatible_health_probe_falls_back_when_root_health_missing(self) -> None:
+        client = MySearchClient()
+        provider = client.config.xai
+        provider.search_mode = "compatible"
+        provider.default_paths["social_search"] = "/social/search"
+        provider.default_paths["social_health"] = "/social/health"
+        provider.alternate_base_urls["social_search"] = "http://gateway.example/admin?foo=1"
+        provider.alternate_base_urls["social_health"] = "http://gateway.example/admin?foo=1"
+        calls: list[dict[str, object]] = []
+
+        def fake_request_json(**kwargs):  # type: ignore[no-untyped-def]
+            calls.append(kwargs)
+            if kwargs["path"] == "/health":
+                raise MySearchHTTPError(
+                    provider="xai",
+                    status_code=404,
+                    detail="not found",
+                    url="http://gateway.example/health",
+                )
+            return {"provider": "custom_social", "results": [{"url": "https://x.com/openai/status/1"}]}
+
+        client._request_json = fake_request_json  # type: ignore[method-assign]
+
+        client._probe_provider_request(provider, "gateway-token")
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["method"], "GET")
+        self.assertEqual(calls[0]["path"], "/health")
+        self.assertEqual(calls[1]["method"], "POST")
+        self.assertEqual(calls[1]["path"], "/social/search")
+        self.assertEqual(calls[1]["payload"]["max_results"], 1)
+        self.assertEqual(calls[1]["payload"]["model"], "grok-4.1-fast")
+
+    def test_xai_official_health_probe_uses_status_page(self) -> None:
+        client = MySearchClient()
+        provider = client.config.xai
+        provider.search_mode = "official"
+        calls: list[dict[str, object]] = []
+
+        def fake_request_text(**kwargs):  # type: ignore[no-untyped-def]
+            calls.append(kwargs)
+            return 200, "API (us-east-1.api.x.ai) available"
+
+        client._request_text = fake_request_text  # type: ignore[method-assign]
+
+        client._probe_provider_request(provider, "official-key")
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["url"], "https://status.x.ai/")
+
+    def test_xai_official_health_probe_falls_back_to_fast_responses_when_status_check_fails(self) -> None:
+        client = MySearchClient()
+        provider = client.config.xai
+        provider.search_mode = "official"
+        provider.default_paths["responses"] = "/responses"
+        text_calls: list[dict[str, object]] = []
+        json_calls: list[dict[str, object]] = []
+
+        def fake_request_text(**kwargs):  # type: ignore[no-untyped-def]
+            text_calls.append(kwargs)
+            raise MySearchError("unable to determine xAI API status from status.x.ai")
+
+        def fake_request_json(**kwargs):  # type: ignore[no-untyped-def]
+            json_calls.append(kwargs)
+            return {"id": "resp_123", "status": "completed"}
+
+        client._request_text = fake_request_text  # type: ignore[method-assign]
+        client._request_json = fake_request_json  # type: ignore[method-assign]
+
+        client._probe_provider_request(provider, "official-key")
+
+        self.assertEqual(len(text_calls), 1)
+        self.assertEqual(len(json_calls), 1)
+        self.assertEqual(json_calls[0]["path"], "/responses")
+        self.assertEqual(json_calls[0]["payload"]["model"], "grok-4.1-fast")
 
     def test_github_blob_raw_urls_try_common_branch_aliases(self) -> None:
         client = MySearchClient()

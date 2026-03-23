@@ -515,11 +515,20 @@ class MySearchConfig:
                         proxy_default="/social/search",
                         default="/social/search",
                     ),
+                    "social_health": _provider_path(
+                        explicit_name="MYSEARCH_XAI_SOCIAL_HEALTH_PATH",
+                        proxy_base_url=proxy_base_url,
+                        proxy_default="/social/health",
+                        default="/social/health",
+                    ),
                 },
                 alternate_base_urls={
                     "social_search": _normalize_base_url(
                         _get_str("MYSEARCH_XAI_SOCIAL_BASE_URL") or proxy_base_url
-                    )
+                    ),
+                    "social_health": _normalize_base_url(
+                        _get_str("MYSEARCH_XAI_SOCIAL_BASE_URL") or proxy_base_url
+                    ),
                 },
                 search_mode=_get_str(
                     "MYSEARCH_XAI_SEARCH_MODE",

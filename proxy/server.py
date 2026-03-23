@@ -1968,10 +1968,16 @@ def has_social_fallback(primary_model, fallback_model):
     return bool(primary and fallback and fallback != primary)
 
 
-def should_retry_social_with_fallback(primary_model, fallback_model, response, min_results):
+def effective_social_fallback_threshold(min_results, max_results):
+    configured = max(1, int(min_results or 1))
+    requested = max(1, int(max_results or 1))
+    return min(configured, requested)
+
+
+def should_retry_social_with_fallback(primary_model, fallback_model, response, min_results, max_results):
     if not has_social_fallback(primary_model, fallback_model):
         return False, ""
-    threshold = max(1, int(min_results or 1))
+    threshold = effective_social_fallback_threshold(min_results, max_results)
     if count_social_results(response) >= threshold:
         return False, ""
     return True, "result_count_below_threshold"
@@ -2003,6 +2009,7 @@ def build_social_route_metadata(
     fallback_model,
     fallback_reason,
     fallback_min_results,
+    requested_max_results,
 ):
     primary_model = attempts[0]["model"] if attempts else ""
     selected_model = (selected_attempt or {}).get("model") or primary_model
@@ -2032,7 +2039,10 @@ def build_social_route_metadata(
             "triggered": fallback_attempted,
             "used": bool(fallback_attempted and selected_model == fallback_target),
             "reason": fallback_reason or "",
-            "threshold": max(1, int(fallback_min_results or 1)),
+            "threshold": effective_social_fallback_threshold(
+                fallback_min_results,
+                requested_max_results,
+            ),
             "from": primary_model,
             "to": fallback_target,
             "selected_model": selected_model,
@@ -2048,6 +2058,7 @@ def attach_social_route_metadata(
     fallback_model,
     fallback_reason,
     fallback_min_results,
+    requested_max_results,
 ):
     payload = dict(response or {})
     tool_usage = dict(payload.get("tool_usage") or {})
@@ -2060,6 +2071,7 @@ def attach_social_route_metadata(
         fallback_model=fallback_model,
         fallback_reason=fallback_reason,
         fallback_min_results=fallback_min_results,
+        requested_max_results=requested_max_results,
     )
     return payload
 
@@ -2352,6 +2364,10 @@ async def proxy_exa_search(request: Request):
 @app.get("/social/health")
 async def social_health():
     state = await resolve_social_gateway_state(force=False)
+    return _build_social_health_payload(state)
+
+
+def _build_social_health_payload(state):
     return {
         "ok": bool(state["resolved_upstream_api_key"] and state["accepted_tokens"]),
         "mode": state["mode"],
@@ -2370,6 +2386,14 @@ async def social_health():
         "stats": state["stats"],
         "error": state["error"],
     }
+
+
+@app.get("/health")
+async def health():
+    state = await resolve_social_gateway_state(force=False)
+    payload = _build_social_health_payload(state)
+    payload["service"] = "proxy"
+    return payload
 
 
 @app.post("/social/search")
@@ -2394,11 +2418,12 @@ async def proxy_social_search(request: Request):
 
     max_results = max(1, min(int(body.get("max_results") or 5), 10))
     attempts = []
+    primary_model = str(body.get("model") or state["model"]).strip() or state["model"]
     primary_attempt = await execute_social_search_attempt(
         query,
         body,
         state,
-        state["model"],
+        primary_model,
         max_results,
     )
     attempts.append(primary_attempt)
@@ -2410,10 +2435,11 @@ async def proxy_social_search(request: Request):
     if primary_attempt.get("ok"):
         selected_attempt = primary_attempt
         should_retry, fallback_reason = should_retry_social_with_fallback(
-            state["model"],
+            primary_model,
             fallback_model,
             primary_attempt.get("response"),
             fallback_min_results,
+            max_results,
         )
         if should_retry:
             fallback_attempt = await execute_social_search_attempt(
@@ -2433,9 +2459,10 @@ async def proxy_social_search(request: Request):
             fallback_model=fallback_model,
             fallback_reason=fallback_reason,
             fallback_min_results=fallback_min_results,
+            requested_max_results=max_results,
         )
 
-    if has_social_fallback(state["model"], fallback_model):
+    if has_social_fallback(primary_model, fallback_model):
         fallback_reason = "upstream_error"
         fallback_attempt = await execute_social_search_attempt(
             query,
@@ -2453,6 +2480,7 @@ async def proxy_social_search(request: Request):
                 fallback_model=fallback_model,
                 fallback_reason=fallback_reason,
                 fallback_min_results=fallback_min_results,
+                requested_max_results=max_results,
             )
         detail = fallback_attempt.get("error") or primary_attempt.get("error") or "Social search failed"
         status_code = fallback_attempt.get("status_code") or primary_attempt.get("status_code") or 502
