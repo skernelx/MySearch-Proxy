@@ -1273,8 +1273,11 @@ class MySearchClient:
                         "reason": str(last_error)[:200] if last_error else "primary provider failed",
                     }
                 return result, fallback_info
-            except (MySearchError, Exception) as exc:
+            except MySearchError as exc:
                 last_error = exc
+                continue
+            except Exception as exc:
+                last_error = MySearchError(f"{provider_name}: {exc}")
                 continue
         raise MySearchError(
             f"All providers failed for query '{query[:80]}': {last_error}"
@@ -1395,9 +1398,13 @@ class MySearchClient:
             secondary_result = None
             secondary_error = ""
         elif primary_failed and secondary_failed:
-            # Both failed — raise the primary error
-            self._raise_parallel_error(blended_errors, "primary")
-            return {}  # unreachable, keeps type checker happy
+            # Both failed — raise with context from both
+            primary_err = str(blended_errors["primary"])[:150]
+            secondary_err = str(blended_errors["secondary"])[:150]
+            raise MySearchError(
+                f"Blended search failed: primary ({decision.provider}): {primary_err}; "
+                f"secondary: {secondary_err}"
+            )
         else:
             primary_result = blended_results["primary"]
             secondary_result = blended_results.get("secondary")
@@ -2350,7 +2357,9 @@ class MySearchClient:
         try:
             parsed = date.fromisoformat(value)
         except ValueError:
-            return None
+            raise MySearchError(
+                f"Invalid date format: '{value}'. Use ISO format YYYY-MM-DD."
+            )
         bound_time = dt_time.max if end_of_day else dt_time.min
         return datetime.combine(parsed, bound_time).replace(tzinfo=timezone.utc)
 
@@ -2918,8 +2927,13 @@ class MySearchClient:
         except HTTPError as exc:
             status_code = exc.code
             response_text = exc.read().decode("utf-8", errors="replace")
+        except TimeoutError as exc:
+            effective_timeout = timeout_seconds or self.config.timeout_seconds
+            raise MySearchError(
+                f"{provider.name} request timeout after {effective_timeout}s: {url}"
+            ) from exc
         except (URLError, OSError) as exc:
-            raise MySearchError(str(exc)) from exc
+            raise MySearchError(f"{provider.name} network error: {exc}") from exc
 
         try:
             data = json.loads(response_text)

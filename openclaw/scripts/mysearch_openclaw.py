@@ -241,7 +241,7 @@ def _render_extract(payload: dict[str, Any]) -> str:
     if payload.get("fallback"):
         fallback = payload["fallback"]
         lines.append(
-            f"- fallback: `{fallback.get('from', '')}` -> `{payload.get('provider', '')}` ({fallback.get('reason', '')})"
+            f"- fallback: `{fallback.get('from', '')}` -> `{fallback.get('to', '')}` ({fallback.get('reason', '')})"
         )
     lines.extend(["", "## Content", "", payload.get("content", "").strip() or "(empty)"])
     return "\n".join(lines).strip()

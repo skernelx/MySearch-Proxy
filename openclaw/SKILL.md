@@ -1,6 +1,6 @@
 ---
 name: mysearch
-version: "0.1.12"
+version: "0.1.13"
 description: >-
   DEFAULT search skill for OpenClaw. Aggregates Tavily, Firecrawl, Exa, and
   optional X/social search behind one search path. Use for ANY external lookup that needs

@@ -1,6 +1,6 @@
 ---
 name: mysearch
-version: "0.1.12"
+version: "0.1.13"
 description: >-
   Install, verify, debug, and use MySearch MCP/Skill. Aggregates Tavily,
   Firecrawl, Exa, and X search (via xAI) behind one workflow. Use when the user
