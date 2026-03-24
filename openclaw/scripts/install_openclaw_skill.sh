@@ -84,7 +84,8 @@ What changed:
 Next steps:
 1. Prefer injecting env via OpenClaw skill config instead of copying secrets into the skill folder
 2. Minimal trusted setup: MYSEARCH_PROXY_BASE_URL + MYSEARCH_PROXY_API_KEY
-3. If you do not have a proxy yet, fall back to MYSEARCH_TAVILY_API_KEY + MYSEARCH_FIRECRAWL_API_KEY
-4. Only use --copy-env or $TARGET_DIR/.env for local debugging
-5. Run: python3 $TARGET_DIR/scripts/mysearch_openclaw.py health
+3. If you want Tavily to consume an upstream gateway, set MYSEARCH_TAVILY_MODE=gateway + MYSEARCH_TAVILY_GATEWAY_BASE_URL + MYSEARCH_TAVILY_GATEWAY_TOKEN
+4. If you do not have a proxy yet, fall back to MYSEARCH_TAVILY_API_KEY + MYSEARCH_FIRECRAWL_API_KEY
+5. Only use --copy-env or $TARGET_DIR/.env for local debugging
+6. Run: python3 $TARGET_DIR/scripts/mysearch_openclaw.py health
 EOF

@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import io
 import os
+import sys
 import threading
 import time
 import unittest
@@ -17,6 +18,10 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from unittest.mock import patch
 from urllib.error import HTTPError
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from mysearch.clients import (
     MySearchClient,
@@ -223,6 +228,7 @@ class RoutingTests(unittest.TestCase):
             "provider": "auto",
             "sources": ["web"],
             "include_content": False,
+            "include_domains": None,
             "allowed_x_handles": None,
             "excluded_x_handles": None,
         }
@@ -243,6 +249,22 @@ class RoutingTests(unittest.TestCase):
         client = _make_client()
         decision = self._route(client, provider="exa")
         self.assertEqual(decision.provider, "exa")
+
+    def test_docs_query_with_restricted_domain_prefers_firecrawl(self) -> None:
+        client = _make_client(tavily_keys=["tv"], firecrawl_keys=["fc"])
+        client._probe_provider_status = lambda provider, key_count: {  # type: ignore[method-assign]
+            "status": "ok",
+            "error": "",
+            "checked_at": "2026-03-22T00:00:00+00:00",
+        }
+        decision = self._route(
+            client,
+            query="linux.do MCP 配置",
+            mode="docs",
+            intent="resource",
+            include_domains=["linux.do"],
+        )
+        self.assertEqual(decision.provider, "firecrawl")
 
     def test_explicit_xai_provider(self) -> None:
         client = _make_client()
@@ -274,12 +296,13 @@ class RoutingTests(unittest.TestCase):
         decision = self._route(client, mode="docs", include_content=True)
         self.assertEqual(decision.provider, "firecrawl")
 
-    def test_docs_mode_without_content_and_tavily_available_routes_to_tavily(self) -> None:
-        client = _make_client(tavily_keys=["key1"])
+    def test_docs_mode_without_content_routes_to_firecrawl(self) -> None:
+        client = _make_client(tavily_keys=["key1"], firecrawl_keys=["fc"])
         decision = self._route(client, mode="docs", include_content=False)
-        self.assertEqual(decision.provider, "tavily")
+        self.assertEqual(decision.provider, "firecrawl")
+        self.assertEqual(decision.fallback_chain, ["tavily"])
 
-    def test_docs_fallback_to_exa_when_tavily_and_firecrawl_unavailable(self) -> None:
+    def test_docs_route_keeps_firecrawl_primary_even_when_keys_missing(self) -> None:
         client = _make_client(
             tavily_keys=[],
             firecrawl_keys=[],
@@ -287,6 +310,7 @@ class RoutingTests(unittest.TestCase):
         )
         decision = self._route(client, mode="docs", include_content=False)
         self.assertEqual(decision.provider, "exa")
+        self.assertIsNone(decision.fallback_chain)
 
     def test_news_mode_routes_to_tavily(self) -> None:
         client = _make_client(tavily_keys=["key1"])
@@ -303,17 +327,20 @@ class RoutingTests(unittest.TestCase):
         client = _make_client(tavily_keys=[], exa_keys=["exa-key"])
         decision = self._route(client, mode="web")
         self.assertEqual(decision.provider, "exa")
+        self.assertEqual(decision.fallback_chain, ["firecrawl"])
 
     def test_github_mode_routes_to_docs_path(self) -> None:
         """GitHub mode should follow docs routing path."""
         client = _make_client(tavily_keys=["key"])
         decision = self._route(client, mode="github", include_content=False)
-        self.assertEqual(decision.provider, "tavily")
+        self.assertEqual(decision.provider, "firecrawl")
+        self.assertEqual(decision.fallback_chain, ["tavily"])
 
     def test_pdf_mode_routes_to_docs_path(self) -> None:
         client = _make_client(tavily_keys=["key"])
         decision = self._route(client, mode="pdf", include_content=False)
-        self.assertEqual(decision.provider, "tavily")
+        self.assertEqual(decision.provider, "firecrawl")
+        self.assertEqual(decision.fallback_chain, ["tavily"])
 
     def test_include_content_routes_to_firecrawl(self) -> None:
         client = _make_client()
@@ -465,6 +492,54 @@ class BlendingDecisionTests(unittest.TestCase):
             strategy="balanced",
         ))
 
+    def test_no_blend_for_docs_mode(self) -> None:
+        client = _make_client(tavily_keys=["k"], firecrawl_keys=["k"])
+        self.assertFalse(client._should_blend_web_providers(
+            requested_provider="auto",
+            decision=RouteDecision(provider="tavily", reason="test"),
+            sources=["web"],
+            strategy="balanced",
+            mode="docs",
+            intent="resource",
+            include_domains=None,
+        ))
+
+    def test_no_blend_for_resource_intent(self) -> None:
+        client = _make_client(tavily_keys=["k"], firecrawl_keys=["k"])
+        self.assertFalse(client._should_blend_web_providers(
+            requested_provider="auto",
+            decision=RouteDecision(provider="tavily", reason="test"),
+            sources=["web"],
+            strategy="balanced",
+            mode="auto",
+            intent="resource",
+            include_domains=None,
+        ))
+
+    def test_no_blend_when_include_domains_present(self) -> None:
+        client = _make_client(tavily_keys=["k"], firecrawl_keys=["k"])
+        self.assertFalse(client._should_blend_web_providers(
+            requested_provider="auto",
+            decision=RouteDecision(provider="tavily", reason="test"),
+            sources=["web"],
+            strategy="balanced",
+            mode="auto",
+            intent="factual",
+            include_domains=["openai.com"],
+        ))
+
+    def test_no_blend_for_news_profile(self) -> None:
+        client = _make_client(tavily_keys=["k"], firecrawl_keys=["k"])
+        self.assertFalse(client._should_blend_web_providers(
+            requested_provider="auto",
+            decision=RouteDecision(provider="tavily", reason="test", result_profile="news"),
+            sources=["web"],
+            strategy="balanced",
+            mode="news",
+            intent="news",
+            include_domains=None,
+        ))
+
     def test_blend_when_conditions_met(self) -> None:
         client = _make_client(tavily_keys=["k"], firecrawl_keys=["k"])
         self.assertTrue(client._should_blend_web_providers(
@@ -472,6 +547,9 @@ class BlendingDecisionTests(unittest.TestCase):
             decision=RouteDecision(provider="tavily", reason="test"),
             sources=["web"],
             strategy="balanced",
+            mode="auto",
+            intent="factual",
+            include_domains=None,
         ))
 
 
@@ -1070,6 +1148,60 @@ class ErrorHandlingTests(unittest.TestCase):
         client = _make_client()
         with self.assertRaises(MySearchError):
             client.research(query="")
+
+    def test_research_evidence_includes_search_confidence_and_page_coverage(self) -> None:
+        client = _make_client()
+
+        client.search = lambda **kwargs: {  # type: ignore[method-assign]
+            "provider": "tavily",
+            "intent": "resource",
+            "strategy": "balanced",
+            "results": [
+                {
+                    "title": "Responses | OpenAI API Reference",
+                    "url": "https://platform.openai.com/docs/api-reference/responses",
+                    "snippet": "Official docs",
+                    "content": "",
+                }
+            ],
+            "citations": [
+                {
+                    "title": "Responses | OpenAI API Reference",
+                    "url": "https://platform.openai.com/docs/api-reference/responses",
+                }
+            ],
+            "evidence": {
+                "providers_consulted": ["tavily"],
+                "verification": "single-provider",
+                "citation_count": 1,
+                "source_diversity": 1,
+                "source_domains": ["openai.com"],
+                "official_source_count": 1,
+                "official_mode": "strict",
+                "confidence": "high",
+                "conflicts": [],
+            },
+        }
+        client.extract_url = lambda **kwargs: {  # type: ignore[method-assign]
+            "url": kwargs["url"],
+            "provider": "firecrawl",
+            "content": "Background mode lets requests run asynchronously.",
+            "cache": {"extract": {"hit": False, "ttl_seconds": 300}},
+        }
+
+        result = client.research(
+            query="OpenAI Responses API official docs",
+            mode="docs",
+            include_social=False,
+            scrape_top_n=1,
+        )
+
+        self.assertEqual(result["evidence"]["official_mode"], "strict")
+        self.assertEqual(result["evidence"]["search_confidence"], "high")
+        self.assertEqual(result["evidence"]["page_count"], 1)
+        self.assertEqual(result["evidence"]["page_success_rate"], 1.0)
+        self.assertEqual(result["evidence"]["confidence"], "high")
+        self.assertEqual(result["evidence"]["source_domains"], ["openai.com"])
 
 
 # ===========================================================================

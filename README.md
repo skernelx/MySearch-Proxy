@@ -197,26 +197,40 @@ python3 skill/scripts/check_mysearch.py --health-only
 python3 skill/scripts/check_mysearch.py --web-query "OpenAI latest announcements"
 ```
 
-### 路线 B：先部署 Proxy，再让所有客户端复用
+### 路线 B：最简单的单容器部署
 
 ```bash
-mkdir -p mysearch-proxy-data
-
 docker run -d \
-  --name mysearch-proxy \
+  --name mysearch-stack \
   --restart unless-stopped \
   -p 9874:9874 \
+  -p 8000:8000 \
   -e ADMIN_PASSWORD=change-me \
-  -v $(pwd)/mysearch-proxy-data:/app/data \
-  skernelx/mysearch-proxy:latest
+  -e MYSEARCH_PROXY_BOOTSTRAP_TOKEN=change-me-bootstrap-token \
+  -v $(pwd)/mysearch-proxy-data:/data \
+  skernelx/mysearch-stack:latest
 ```
 
-部署后：
+部署完成后：
 
-1. 登录控制台
-2. 添加 Tavily / Firecrawl / Exa / Social 上游配置
-3. 创建 MySearch 通用 token
-4. 把这个 token 填给 `mysearch/.env` 或 OpenClaw skill env
+- `proxy` 控制台：`http://localhost:9874`
+- `mysearch` MCP：`http://localhost:8000/mcp`
+
+单容器镜像里，`proxy` 默认对外监听 `9874`，`mysearch` 默认对外监听 `8000/mcp`；`mysearch` 自己仍然通过容器内 `127.0.0.1:9874` 访问 Proxy。
+
+这条链路里不再需要手动先创建 `mysp-` token。容器启动时会通过受限 bootstrap 接口自动创建或复用一个 `mysearch` 代理 token，再交给同容器里的 `mysearch` 运行时使用。
+
+### 路线 C：一套 compose 部署 `proxy + mysearch`
+
+```bash
+cd /path/to/MySearch-Proxy
+docker compose up -d
+```
+
+部署完成后：
+
+- `proxy` 控制台：`http://localhost:9874`
+- `mysearch` MCP：`http://localhost:8000/mcp`
 
 ## 目录说明
 

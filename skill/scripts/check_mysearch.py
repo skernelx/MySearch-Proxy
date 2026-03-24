@@ -59,7 +59,16 @@ def parse_codex_mysearch_env(config_text: str) -> dict[str, str]:
 
 def load_codex_mcp_env() -> None:
     """在干净仓库里也尽量复用 Codex 已注册的 mysearch MCP 环境变量。"""
-    if any(os.getenv(name) for name in ("MYSEARCH_PROXY_BASE_URL", "MYSEARCH_TAVILY_API_KEY")):
+    if any(
+        os.getenv(name)
+        for name in (
+            "MYSEARCH_PROXY_BASE_URL",
+            "MYSEARCH_TAVILY_API_KEY",
+            "MYSEARCH_TAVILY_MODE",
+            "MYSEARCH_TAVILY_GATEWAY_BASE_URL",
+            "MYSEARCH_TAVILY_GATEWAY_TOKEN",
+        )
+    ):
         return
 
     codex_home = Path(os.getenv("CODEX_HOME", "~/.codex")).expanduser()

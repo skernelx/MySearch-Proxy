@@ -153,7 +153,7 @@ docker run -d \
   --restart unless-stopped \
   -p 9874:9874 \
   -e ADMIN_PASSWORD=change-me \
-  -v $(pwd)/mysearch-proxy-data:/app/data \
+  -v $(pwd)/mysearch-proxy-data:/data \
   skernelx/mysearch-proxy:latest
 ```
 
@@ -170,7 +170,39 @@ cd proxy
 docker compose up -d
 ```
 
-### 方式 C：本地源码运行
+### 方式 C：仓库根目录一套部署 `proxy + mysearch`
+
+```bash
+cd /path/to/MySearch-Proxy
+docker compose up -d
+```
+
+这套 compose 现在会自动通过 `MYSEARCH_PROXY_BOOTSTRAP_TOKEN` 给 `mysearch` 创建或复用一个专用的 `mysp-` token，不需要再手动先创建 MySearch 通用 token 才能拉起远程 MCP。首次进入控制台后，仍然只需要补 provider 配置和 usage sync。
+
+启动后：
+
+- 控制台：`http://localhost:9874`
+- MySearch MCP：`http://localhost:8000/mcp`
+
+### 方式 D：单容器一体化镜像
+
+```bash
+docker run -d \
+  --name mysearch-stack \
+  --restart unless-stopped \
+  -p 9874:9874 \
+  -p 8000:8000 \
+  -e ADMIN_PASSWORD=change-me \
+  -e MYSEARCH_PROXY_BOOTSTRAP_TOKEN=change-me-bootstrap-token \
+  -v $(pwd)/mysearch-proxy-data:/data \
+  skernelx/mysearch-stack:latest
+```
+
+这个镜像会在同一个容器里同时启动 `proxy` 和 `mysearch`，并通过本地回环地址自动完成 token bootstrap。适合你更看重“部署步骤最少”而不是“服务边界最清晰”的场景。
+
+默认情况下，`proxy` 会对外监听 `9874`，`mysearch` 会对外监听 `8000/mcp`；`mysearch` 自己仍然通过容器内 `127.0.0.1:9874` 回连 Proxy。
+
+### 方式 E：本地源码运行
 
 ```bash
 cd proxy
@@ -190,6 +222,8 @@ ADMIN_PASSWORD=change-me uvicorn server:app --host 0.0.0.0 --port 9874
 6. 把 `MYSEARCH_PROXY_BASE_URL` 和 `MYSEARCH_PROXY_API_KEY` 填给客户端
 
 当前控制台已经带密码登录，不再适合匿名裸放在公网。
+
+持久化目录现在统一建议挂到 `/data`。无论你跑独立 `mysearch-proxy` 还是单容器 `mysearch-stack`，都保持 `-v ...:/data`，不要再混用 `/app/data` 和 `/app/proxy/data`，否则升级重建容器时会像“数据丢失”，实际只是读到了另一份空 SQLite。
 
 ## 下游怎么接
 
@@ -242,9 +276,9 @@ MYSEARCH_PROXY_API_KEY=mysp-...
 默认数据目录：
 
 - Docker compose
-  - `./data`
+  - 宿主目录 `./data` 挂到容器内 `/data`
 - `docker run` 示例
-  - `$(pwd)/mysearch-proxy-data`
+  - 宿主目录 `$(pwd)/mysearch-proxy-data` 挂到容器内 `/data`
 
 ## 认证与安全
 

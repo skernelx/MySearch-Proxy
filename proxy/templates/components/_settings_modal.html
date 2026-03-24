@@ -1,0 +1,225 @@
+<div class="settings-modal-shell hidden" id="settings-modal">
+  <div class="settings-backdrop" onclick="closeSettingsModal()"></div>
+  <div class="settings-dialog card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="settings-head">
+      <div>
+        <div class="settings-kicker">Console Settings</div>
+        <h2 id="settings-title">控制台配置中心</h2>
+        <p>把登录权限、Tavily 路由和 Social / X 上游分开管理。保存后会立即刷新当前控制台状态，不需要手动重载页面。</p>
+        <div class="settings-head-meta">
+          <span class="settings-meta-pill">Console</span>
+          <span class="settings-meta-pill">Tavily</span>
+          <span class="settings-meta-pill">Social / X</span>
+        </div>
+      </div>
+      <button class="btn btn-soft" type="button" data-overlay-autofocus="true" onclick="closeSettingsModal()">关闭</button>
+    </div>
+
+    <div class="settings-tabs" role="tablist" aria-label="Settings tabs">
+      <button type="button" class="settings-tab is-active" data-settings-tab="console" aria-selected="true" onclick="setActiveSettingsTab('console')">控制台</button>
+      <button type="button" class="settings-tab" data-settings-tab="tavily" aria-selected="false" onclick="setActiveSettingsTab('tavily')">Tavily</button>
+      <button type="button" class="settings-tab" data-settings-tab="social" aria-selected="false" onclick="setActiveSettingsTab('social')">Social / X</button>
+    </div>
+
+    <section class="settings-panel settings-tab-panel is-active" data-settings-panel="console">
+      <div class="settings-panel-grid">
+        <div class="settings-panel-aside">
+          <h3>控制台权限</h3>
+          <p>这里管理管理员密码和当前会话。密码会写入本地数据库，保存后当前页面继续保持登录态。</p>
+          <div class="settings-note-list">
+            <div class="settings-note">适合放控制面通用设置，不和 provider 路由配置混排。</div>
+            <div class="settings-note">修改密码后不需要重新登录；如果要切换账号环境，直接退出当前会话。</div>
+          </div>
+        </div>
+        <div class="settings-panel-main">
+          <form class="settings-form" onsubmit="changePwd(event)">
+            <div class="settings-summary-strip" id="settings-console-summary"></div>
+            <input type="text" name="proxy-admin-user-reset" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;opacity:0;pointer-events:none;height:0">
+            <div class="settings-fields">
+              <div class="settings-field full-width">
+                <label for="settings-new-pwd">新密码</label>
+                <input type="password" id="settings-new-pwd" placeholder="至少 4 位" autocomplete="new-password">
+                <div class="hint">控制台登录密码会立即更新到当前会话。</div>
+              </div>
+            </div>
+            <div class="settings-footer">
+              <div class="settings-footer-copy">
+                <strong>当前 tab 的保存区会固定在底部。</strong>
+                <span>修改后立即写入数据库，并刷新当前控制台状态。</span>
+              </div>
+              <div class="settings-footer-actions">
+                <button type="submit" class="btn btn-primary">保存新密码</button>
+                <button type="button" class="btn btn-danger" onclick="logoutFromSettings()">退出登录</button>
+              </div>
+            </div>
+            <div class="settings-status hidden" id="settings-password-status"></div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-panel settings-tab-panel hidden" data-settings-panel="tavily">
+      <div class="settings-panel-grid">
+        <div class="settings-panel-aside">
+          <h3>Tavily 路由</h3>
+          <p>这里决定 Tavily 走自动识别、API Key 池，还是外部 gateway。自动识别不是 Social/X 那种后台继承，而是按“上游凭证优先，其次本地 API Key 池”的规则选实际接线。</p>
+          <div class="settings-note-list">
+            <div class="settings-note">`auto` 适合作为默认模式。检测到上游凭证就走 Gateway；如果你只是导入 Tavily key，就会默认落到 API Key 池。</div>
+            <div class="settings-note">`pool` 适合你自己维护官方 key；`upstream` 适合接 `tavily-hikari` 这类聚合网关。</div>
+          </div>
+          <div class="settings-secret-meta" id="settings-tavily-meta"></div>
+        </div>
+        <div class="settings-panel-main">
+          <form class="settings-form" onsubmit="saveTavilySettings(event)">
+            <div class="settings-summary-strip" id="settings-tavily-summary"></div>
+            <div class="settings-fields">
+              <div class="settings-field">
+                <label for="settings-tavily-mode">工作模式</label>
+                <input type="hidden" id="settings-tavily-mode" value="auto">
+                <div class="mode-switch" role="tablist" aria-label="Tavily mode switch">
+                  <button type="button" class="mode-switch-btn is-active" data-tavily-mode="auto" aria-selected="true" onclick="setTavilyMode('auto')">自动识别</button>
+                  <button type="button" class="mode-switch-btn" data-tavily-mode="pool" aria-selected="false" onclick="setTavilyMode('pool')">API Key 池</button>
+                  <button type="button" class="mode-switch-btn" data-tavily-mode="upstream" aria-selected="false" onclick="setTavilyMode('upstream')">上游 Gateway</button>
+                </div>
+                <div class="hint" id="settings-tavily-mode-hint">自动模式会先检测上游凭证；如果你只是导入 Tavily key，就会默认回到 API Key 池。</div>
+                <div class="mode-runtime-strip" id="settings-tavily-runtime-strip">当前实际：等待识别</div>
+              </div>
+              <div class="settings-field" data-tavily-upstream-field="true">
+                <label for="settings-tavily-upstream-base-url">上游 Base URL</label>
+                <input type="text" id="settings-tavily-upstream-base-url" placeholder="https://tavily.example.com/api/tavily">
+                <div class="hint">例如 `tavily-hikari` 可直接填写到 `/api/tavily`。</div>
+              </div>
+              <div class="settings-field" data-tavily-upstream-field="true">
+                <label for="settings-tavily-upstream-search-path">Search Path</label>
+                <input type="text" id="settings-tavily-upstream-search-path" placeholder="/search">
+              </div>
+              <div class="settings-field" data-tavily-upstream-field="true">
+                <label for="settings-tavily-upstream-extract-path">Extract Path</label>
+                <input type="text" id="settings-tavily-upstream-extract-path" placeholder="/extract">
+              </div>
+              <div class="settings-field full-width" data-tavily-upstream-field="true">
+                <label for="settings-tavily-upstream-api-key">上游 API key / Gateway token</label>
+                <input type="password" id="settings-tavily-upstream-api-key" placeholder="留空表示保持当前值">
+                <div class="hint" id="settings-tavily-upstream-api-key-hint">未配置</div>
+              </div>
+            </div>
+
+            <div class="settings-footer">
+              <div class="settings-footer-copy">
+                <strong>这里决定 Tavily 是本地池还是上游网关。</strong>
+                <span>切换后会立即影响 `/api/search` 与 `/api/extract` 的实际转发行为。</span>
+              </div>
+              <div class="settings-footer-actions">
+                <button type="button" class="btn btn-soft" onclick="testTavilySettings(this)">测试当前连接</button>
+                <button type="submit" class="btn btn-primary">保存 Tavily 设置</button>
+              </div>
+            </div>
+            <div class="settings-probe hidden" id="settings-tavily-probe"></div>
+            <div class="settings-status hidden" id="settings-tavily-status"></div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-panel settings-tab-panel hidden" data-settings-panel="social">
+      <div class="settings-panel-grid">
+        <div class="settings-panel-aside">
+          <h3>Social / X / grok2api</h3>
+          <p>推荐优先填写 grok2api 后台地址和 `app_key`。如果你有自己的 compatible 网关，也可以在这里手动覆写上游 key、客户端 token 和高级路径。</p>
+          <div class="settings-note-list">
+            <div class="settings-note">优先让后台自动继承 token 池，再考虑手动覆写。</div>
+            <div class="settings-note">这里只管理兼容 Social/X 路由，不影响其他 provider。</div>
+          </div>
+          <div class="settings-secret-meta" id="settings-social-meta"></div>
+        </div>
+        <div class="settings-panel-main">
+          <form class="settings-form" onsubmit="saveSocialSettings(event)">
+            <div class="settings-summary-strip" id="settings-social-summary"></div>
+            <div class="settings-fields">
+              <div class="settings-field">
+                <label for="settings-social-upstream-base-url">搜索上游 Base URL</label>
+                <input type="text" id="settings-social-upstream-base-url" placeholder="https://media.example.com/v1">
+                <div class="hint">真正转发 `/responses` 时使用的上游地址。</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-model">模型</label>
+                <input type="text" id="settings-social-model" placeholder="grok-4.1-fast">
+                <div class="hint">用于 `x_search` 请求的默认模型名。</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-fallback-model">Fallback 模型</label>
+                <input type="text" id="settings-social-fallback-model" placeholder="grok-4.1-fast">
+                <div class="hint">当主模型结果太少或请求失败时，自动补一轮的候选模型。</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-admin-base-url">后台管理地址</label>
+                <input type="text" id="settings-social-admin-base-url" placeholder="https://media.example.com">
+                <div class="hint">推荐填后台根地址，系统会自动拉 `config` 和 `tokens`。</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-admin-app-key">后台管理 app key</label>
+                <input type="password" id="settings-social-admin-app-key" placeholder="留空表示保持当前值">
+                <div class="hint" id="settings-social-admin-app-key-hint">未配置</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-upstream-api-key">搜索上游 API key</label>
+                <input type="password" id="settings-social-upstream-api-key" placeholder="留空表示保持当前值">
+                <div class="hint" id="settings-social-upstream-api-key-hint">未配置</div>
+              </div>
+              <div class="settings-field">
+                <label for="settings-social-gateway-token">客户端访问 token</label>
+                <input type="password" id="settings-social-gateway-token" placeholder="留空表示保持当前值">
+                <div class="hint" id="settings-social-gateway-token-hint">未配置</div>
+              </div>
+            </div>
+
+            <details class="settings-advanced">
+              <summary>高级路径和缓存</summary>
+              <div class="settings-fields">
+                <div class="settings-field">
+                  <label for="settings-social-upstream-responses-path">Responses Path</label>
+                  <input type="text" id="settings-social-upstream-responses-path" placeholder="/responses">
+                </div>
+                <div class="settings-field">
+                  <label for="settings-social-admin-verify-path">Verify Path</label>
+                  <input type="text" id="settings-social-admin-verify-path" placeholder="/v1/admin/verify">
+                </div>
+                <div class="settings-field">
+                  <label for="settings-social-admin-config-path">Config Path</label>
+                  <input type="text" id="settings-social-admin-config-path" placeholder="/v1/admin/config">
+                </div>
+                <div class="settings-field">
+                  <label for="settings-social-admin-tokens-path">Tokens Path</label>
+                  <input type="text" id="settings-social-admin-tokens-path" placeholder="/v1/admin/tokens">
+                </div>
+                <div class="settings-field full-width">
+                  <label for="settings-social-cache-ttl-seconds">缓存秒数</label>
+                  <input type="text" id="settings-social-cache-ttl-seconds" placeholder="60">
+                  <div class="hint">控制后台状态缓存多久刷新一次，最小 5 秒。</div>
+                </div>
+                <div class="settings-field full-width">
+                  <label for="settings-social-fallback-min-results">Fallback 阈值</label>
+                  <input type="text" id="settings-social-fallback-min-results" placeholder="3">
+                  <div class="hint">主模型结果数低于这个值时，会自动尝试 fallback 模型，最小 1。</div>
+                </div>
+              </div>
+            </details>
+
+            <div class="settings-footer">
+              <div class="settings-footer-copy">
+                <strong>优先维护后台接线，再看高级路径。</strong>
+                <span>保存后会刷新 Social 工作台状态、token 来源和兼容路由摘要。</span>
+              </div>
+              <div class="settings-footer-actions">
+                <button type="button" class="btn btn-soft" onclick="testSocialSettings(this)">测试当前连接</button>
+                <button type="submit" class="btn btn-primary">保存 Social / X 设置</button>
+              </div>
+            </div>
+            <div class="settings-probe hidden" id="settings-social-probe"></div>
+            <div class="settings-status hidden" id="settings-social-status"></div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>

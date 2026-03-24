@@ -5,6 +5,7 @@ services:
       - "9874:9874"
     environment:
       - ADMIN_PASSWORD=change-me
+      - MYSEARCH_PROXY_DB_PATH=/data/proxy.db
     volumes:
-      - ./data:/app/data
+      - ./data:/data
     restart: unless-stopped

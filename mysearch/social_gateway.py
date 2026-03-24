@@ -66,7 +66,14 @@ SOCIAL_SEARCH_MODEL = MODEL
 
 http_client = httpx.AsyncClient(timeout=60)
 state_cache: dict[str, Any] = {"expires_at": 0.0, "value": None}
-state_lock = asyncio.Lock()
+state_lock: asyncio.Lock | None = None
+
+
+def get_state_lock() -> asyncio.Lock:
+    global state_lock
+    if state_lock is None:
+        state_lock = asyncio.Lock()
+    return state_lock
 
 
 @asynccontextmanager
@@ -152,12 +159,27 @@ def mask_secret(value: str) -> str:
     return f"{value[:6]}***{value[-4:]}"
 
 
+def unwrap_social_tokens_payload(tokens_payload: Any) -> Any:
+    if isinstance(tokens_payload, dict):
+        for key_name in ("tokens", "data", "items", "result", "pools"):
+            candidate = tokens_payload.get(key_name)
+            if isinstance(candidate, dict):
+                return candidate
+            if isinstance(candidate, list):
+                return {"default": candidate}
+        return tokens_payload
+    if isinstance(tokens_payload, list):
+        return {"default": tokens_payload}
+    return {}
+
+
 def flatten_social_tokens(tokens_payload: Any) -> list[dict[str, Any]]:
     flat: list[dict[str, Any]] = []
-    if not isinstance(tokens_payload, dict):
+    normalized = unwrap_social_tokens_payload(tokens_payload)
+    if not isinstance(normalized, dict):
         return flat
 
-    for pool_name, items in tokens_payload.items():
+    for pool_name, items in normalized.items():
         if not isinstance(items, list):
             continue
         for item in items:
@@ -284,7 +306,7 @@ async def resolve_gateway_state(force: bool = False) -> dict[str, Any]:
     if not force and cached and state_cache.get("expires_at", 0) > now:
         return cached
 
-    async with state_lock:
+    async with get_state_lock():
         now = time.time()
         cached = state_cache.get("value")
         if not force and cached and state_cache.get("expires_at", 0) > now:
@@ -707,15 +729,22 @@ def has_social_fallback(primary_model: str, fallback_model: str) -> bool:
     return bool(primary and fallback and fallback != primary)
 
 
+def effective_social_fallback_threshold(min_results: int, max_results: int) -> int:
+    configured = max(1, int(min_results or 1))
+    requested = max(1, int(max_results or 1))
+    return min(configured, requested)
+
+
 def should_retry_social_with_fallback(
     primary_model: str,
     fallback_model: str,
     response: dict[str, Any] | None,
     min_results: int,
+    max_results: int,
 ) -> tuple[bool, str]:
     if not has_social_fallback(primary_model, fallback_model):
         return False, ""
-    threshold = max(1, int(min_results or 1))
+    threshold = effective_social_fallback_threshold(min_results, max_results)
     if count_social_results(response) >= threshold:
         return False, ""
     return True, "result_count_below_threshold"
@@ -750,6 +779,7 @@ def build_social_route_metadata(
     fallback_model: str,
     fallback_reason: str,
     fallback_min_results: int,
+    requested_max_results: int,
 ) -> dict[str, Any]:
     primary_model = attempts[0]["model"] if attempts else ""
     selected_model = (selected_attempt or {}).get("model") or primary_model
@@ -779,7 +809,10 @@ def build_social_route_metadata(
             "triggered": fallback_attempted,
             "used": bool(fallback_attempted and selected_model == fallback_target),
             "reason": fallback_reason or "",
-            "threshold": max(1, int(fallback_min_results or 1)),
+            "threshold": effective_social_fallback_threshold(
+                fallback_min_results,
+                requested_max_results,
+            ),
             "from": primary_model,
             "to": fallback_target,
             "selected_model": selected_model,
@@ -795,6 +828,7 @@ def attach_social_route_metadata(
     fallback_model: str,
     fallback_reason: str,
     fallback_min_results: int,
+    requested_max_results: int,
 ) -> dict[str, Any]:
     payload = dict(response or {})
     tool_usage = dict(payload.get("tool_usage") or {})
@@ -807,6 +841,7 @@ def attach_social_route_metadata(
         fallback_model=fallback_model,
         fallback_reason=fallback_reason,
         fallback_min_results=fallback_min_results,
+        requested_max_results=requested_max_results,
     )
     return payload
 
@@ -1019,11 +1054,12 @@ async def social_search(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Missing social upstream API key")
     _, max_results = build_upstream_payload(body)
     attempts = []
+    primary_model = str(body.get("model") or state["model"]).strip() or state["model"]
     primary_attempt = await execute_social_search_attempt(
         query,
         body,
         state,
-        state["model"],
+        primary_model,
         max_results,
     )
     attempts.append(primary_attempt)
@@ -1035,10 +1071,11 @@ async def social_search(request: Request) -> dict[str, Any]:
     if primary_attempt.get("ok"):
         selected_attempt = primary_attempt
         should_retry, fallback_reason = should_retry_social_with_fallback(
-            state["model"],
+            primary_model,
             fallback_model,
             primary_attempt.get("response"),
             fallback_min_results,
+            max_results,
         )
         if should_retry:
             fallback_attempt = await execute_social_search_attempt(
@@ -1058,9 +1095,10 @@ async def social_search(request: Request) -> dict[str, Any]:
             fallback_model=fallback_model,
             fallback_reason=fallback_reason,
             fallback_min_results=fallback_min_results,
+            requested_max_results=max_results,
         )
 
-    if has_social_fallback(state["model"], fallback_model):
+    if has_social_fallback(primary_model, fallback_model):
         fallback_reason = "upstream_error"
         fallback_attempt = await execute_social_search_attempt(
             query,
@@ -1078,6 +1116,7 @@ async def social_search(request: Request) -> dict[str, Any]:
                 fallback_model=fallback_model,
                 fallback_reason=fallback_reason,
                 fallback_min_results=fallback_min_results,
+                requested_max_results=max_results,
             )
         detail = fallback_attempt.get("error") or primary_attempt.get("error") or "Social search failed"
         status_code = fallback_attempt.get("status_code") or primary_attempt.get("status_code") or 502

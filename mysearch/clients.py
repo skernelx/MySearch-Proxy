@@ -6,18 +6,25 @@ import copy
 import hashlib
 import json
 import re
+import sys
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass as _dataclass
 from datetime import date, datetime, time as dt_time, timezone
 from typing import Any, Callable, Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from mysearch.config import MySearchConfig, ProviderConfig
 from mysearch.keyring import MySearchKeyRing
+
+
+def dataclass(*args, **kwargs):
+    if sys.version_info < (3, 10):
+        kwargs.pop("slots", None)
+    return _dataclass(*args, **kwargs)
 
 
 SearchMode = Literal["auto", "web", "news", "social", "docs", "research", "github", "pdf"]
@@ -99,6 +106,80 @@ class RouteDecision:
     tavily_topic: str = "general"
     firecrawl_categories: list[str] | None = None
     sources: list[str] | None = None
+    fallback_chain: list[str] | None = None
+    result_profile: Literal["off", "web", "news", "resource"] = "off"
+    allow_exa_rescue: bool = False
+
+
+@dataclass(slots=True)
+class SearchRoutePolicy:
+    key: str
+    provider: str
+    fallback_chain: tuple[str, ...] = ()
+    tavily_topic: str = "general"
+    firecrawl_categories: tuple[str, ...] = ()
+    result_profile: Literal["off", "web", "news", "resource"] = "off"
+    allow_exa_rescue: bool = False
+
+
+_MODE_PROVIDER_POLICY: dict[str, SearchRoutePolicy] = {
+    "web": SearchRoutePolicy(
+        key="web",
+        provider="tavily",
+        fallback_chain=("exa", "firecrawl"),
+        result_profile="web",
+        allow_exa_rescue=True,
+    ),
+    "news": SearchRoutePolicy(
+        key="news",
+        provider="tavily",
+        fallback_chain=("exa",),
+        tavily_topic="news",
+        result_profile="news",
+        allow_exa_rescue=True,
+    ),
+    "docs": SearchRoutePolicy(
+        key="docs",
+        provider="firecrawl",
+        fallback_chain=("tavily", "exa"),
+        firecrawl_categories=("research",),
+        result_profile="resource",
+    ),
+    "github": SearchRoutePolicy(
+        key="github",
+        provider="firecrawl",
+        fallback_chain=("exa", "tavily"),
+        firecrawl_categories=("github",),
+        result_profile="resource",
+    ),
+    "pdf": SearchRoutePolicy(
+        key="pdf",
+        provider="firecrawl",
+        fallback_chain=("tavily", "exa"),
+        firecrawl_categories=("pdf",),
+        result_profile="resource",
+    ),
+    "content": SearchRoutePolicy(
+        key="content",
+        provider="firecrawl",
+        fallback_chain=("tavily", "exa"),
+        result_profile="resource",
+    ),
+    "resource": SearchRoutePolicy(
+        key="resource",
+        provider="firecrawl",
+        fallback_chain=("tavily", "exa"),
+        firecrawl_categories=("research",),
+        result_profile="resource",
+    ),
+    "research": SearchRoutePolicy(
+        key="research",
+        provider="tavily",
+        fallback_chain=("exa", "firecrawl"),
+        result_profile="web",
+        allow_exa_rescue=True,
+    ),
+}
 
 
 class MySearchClient:
@@ -376,6 +457,8 @@ class MySearchClient:
         include_content: bool,
         include_answer: bool,
         cache_hit: bool,
+        requested_max_results: int | None = None,
+        candidate_max_results: int | None = None,
     ) -> dict[str, Any]:
         annotated = copy.deepcopy(result)
         annotated["route_debug"] = {
@@ -388,6 +471,17 @@ class MySearchClient:
             "include_answer": include_answer,
             "cache_hit": cache_hit,
         }
+        if requested_max_results is not None:
+            annotated["route_debug"]["requested_max_results"] = requested_max_results
+        if candidate_max_results is not None:
+            annotated["route_debug"]["candidate_max_results"] = candidate_max_results
+        evidence = annotated.get("evidence") or {}
+        if evidence.get("official_mode"):
+            annotated["route_debug"]["official_mode"] = evidence.get("official_mode")
+        if "official_filter_applied" in evidence:
+            annotated["route_debug"]["official_filter_applied"] = bool(
+                evidence.get("official_filter_applied")
+            )
         return annotated
 
     def search(
@@ -451,8 +545,17 @@ class MySearchClient:
             provider=provider,
             sources=normalized_sources,
             include_content=include_content,
+            include_domains=include_domains,
             allowed_x_handles=allowed_x_handles,
             excluded_x_handles=excluded_x_handles,
+        )
+        candidate_max_results = self._candidate_result_budget(
+            requested_max_results=max_results,
+            strategy=resolved_strategy,
+            mode=mode,
+            intent=resolved_intent,
+            include_domains=include_domains,
+            route_provider=decision.provider,
         )
         cacheable = self._should_cache_search(
             decision=decision,
@@ -490,6 +593,8 @@ class MySearchClient:
                     include_content=include_content,
                     include_answer=effective_include_answer,
                     cache_hit=True,
+                    requested_max_results=max_results,
+                    candidate_max_results=candidate_max_results,
                 )
 
         if decision.provider == "hybrid":
@@ -560,6 +665,13 @@ class MySearchClient:
                 "web": web_result,
                 "social": social_result,
             }
+            hybrid_result = self._augment_evidence_summary(
+                hybrid_result,
+                query=query,
+                mode=mode,
+                intent=resolved_intent,
+                include_domains=include_domains,
+            )
             hybrid_result = self._annotate_search_debug(
                 hybrid_result,
                 provider=provider,
@@ -570,6 +682,8 @@ class MySearchClient:
                 include_content=include_content,
                 include_answer=effective_include_answer,
                 cache_hit=False,
+                requested_max_results=max_results,
+                candidate_max_results=candidate_max_results,
             )
             return hybrid_result
 
@@ -578,6 +692,9 @@ class MySearchClient:
             decision=decision,
             sources=normalized_sources,
             strategy=resolved_strategy,
+            mode=mode,
+            intent=resolved_intent,
+            include_domains=include_domains,
         ):
             result = self._search_web_blended(
                 query=query,
@@ -585,17 +702,17 @@ class MySearchClient:
                 intent=resolved_intent,
                 strategy=resolved_strategy,
                 decision=decision,
-                max_results=max_results,
+                max_results=candidate_max_results,
                 include_content=include_content,
                 include_answer=effective_include_answer,
                 include_domains=include_domains,
                 exclude_domains=exclude_domains,
             )
-        elif decision.provider in ("tavily", "firecrawl", "exa"):
+        elif decision.provider in {"tavily", "firecrawl", "exa"}:
             result, fallback_info = self._search_with_fallback(
                 primary_provider=decision.provider,
                 query=query,
-                max_results=max_results,
+                max_results=candidate_max_results,
                 mode=mode,
                 intent=resolved_intent,
                 decision=decision,
@@ -622,6 +739,64 @@ class MySearchClient:
             )
         else:
             raise MySearchError(f"Unsupported route decision: {decision.provider}")
+
+        if self._should_attempt_exa_rescue(
+            query=query,
+            mode=mode,
+            intent=resolved_intent,
+            decision=decision,
+            result=result,
+            max_results=max_results,
+            include_domains=include_domains,
+        ):
+            result = self._apply_exa_rescue(
+                query=query,
+                primary_result=result,
+                max_results=candidate_max_results,
+                include_domains=include_domains,
+                exclude_domains=exclude_domains,
+                include_content=include_content,
+            )
+
+        if self._should_rerank_resource_results(mode=mode, intent=resolved_intent):
+            reranked_results = self._rerank_resource_results(
+                query=query,
+                mode=mode,
+                results=list(result.get("results") or []),
+                include_domains=include_domains,
+            )
+            result["results"] = reranked_results
+            result["citations"] = self._align_citations_with_results(
+                results=reranked_results,
+                citations=list(result.get("citations") or []),
+            )
+        elif self._should_rerank_general_results(result_profile=decision.result_profile):
+            reranked_results = self._rerank_general_results(
+                query=query,
+                result_profile=decision.result_profile,
+                results=list(result.get("results") or []),
+                include_domains=include_domains,
+            )
+            result["results"] = reranked_results
+            result["citations"] = self._align_citations_with_results(
+                results=reranked_results,
+                citations=list(result.get("citations") or []),
+            )
+        result = self._apply_official_resource_policy(
+            query=query,
+            mode=mode,
+            intent=resolved_intent,
+            result=result,
+            include_domains=include_domains,
+        )
+        result = self._trim_search_payload(result, max_results=max_results)
+        result = self._augment_evidence_summary(
+            result,
+            query=query,
+            mode=mode,
+            intent=resolved_intent,
+            include_domains=include_domains,
+        )
 
         route_reason = decision.reason
         if result.get("provider") == "hybrid" and resolved_strategy in {"balanced", "verify", "deep"}:
@@ -668,6 +843,8 @@ class MySearchClient:
             include_content=include_content,
             include_answer=effective_include_answer,
             cache_hit=False,
+            requested_max_results=max_results,
+            candidate_max_results=candidate_max_results,
         )
 
     def extract_url(
@@ -816,17 +993,39 @@ class MySearchClient:
         query = query.strip()
         if not query:
             raise MySearchError("query must not be empty")
-
-        web_mode = "news" if mode == "news" else ("docs" if mode in {"docs", "github", "pdf"} else "web")
+        resolved_intent = self._resolve_intent(
+            query=query,
+            mode=mode,
+            intent=intent,
+            sources=["web"],
+        )
+        resolved_strategy = self._resolve_strategy(
+            mode=mode,
+            intent=resolved_intent,
+            strategy=strategy,
+            sources=["web"],
+            include_content=False,
+        )
+        research_plan = self._resolve_research_plan(
+            query=query,
+            mode=mode,
+            intent=resolved_intent,
+            strategy=resolved_strategy,
+            web_max_results=web_max_results,
+            social_max_results=social_max_results,
+            scrape_top_n=scrape_top_n,
+            include_social=include_social,
+            include_domains=include_domains,
+        )
         research_tasks: dict[str, Callable[[], Any]] = {
             "web": lambda: self.search(
                 query=query,
-                mode=web_mode,
-                intent=intent,
-                strategy=strategy,
+                mode=research_plan["web_mode"],
+                intent=resolved_intent,
+                strategy=resolved_strategy,
                 provider="auto",
                 sources=["web"],
-                max_results=web_max_results,
+                max_results=research_plan["web_max_results"],
                 include_content=False,
                 include_answer=True,
                 include_domains=include_domains,
@@ -840,7 +1039,7 @@ class MySearchClient:
                 intent="status",
                 provider="auto",
                 sources=["x"],
-                max_results=social_max_results,
+                max_results=research_plan["social_max_results"],
                 allowed_x_handles=allowed_x_handles,
                 excluded_x_handles=excluded_x_handles,
                 from_date=from_date,
@@ -864,7 +1063,7 @@ class MySearchClient:
             if not url or url in urls:
                 continue
             urls.append(url)
-            if len(urls) >= scrape_top_n:
+            if len(urls) >= research_plan["scrape_top_n"]:
                 break
 
         pages: list[dict[str, Any]] = []
@@ -907,31 +1106,433 @@ class MySearchClient:
             web_search.get("citations") or [],
             (social.get("citations") or []) if social else [],
         )
+        evidence = self._augment_research_evidence(
+            query=query,
+            mode=mode,
+            intent=web_search.get("intent", intent if intent != "auto" else "factual"),
+            requested_page_count=len(urls),
+            pages=pages,
+            citations=citations,
+            web_search=web_search,
+            social=social,
+            social_error=social_error,
+            providers_consulted=providers_consulted,
+            research_plan=research_plan,
+        )
 
         return {
             "provider": "hybrid",
             "query": query,
-            "intent": web_search.get("intent", intent if intent != "auto" else "factual"),
-            "strategy": web_search.get("strategy", strategy if strategy != "auto" else "fast"),
+            "intent": web_search.get("intent", resolved_intent),
+            "strategy": web_search.get("strategy", resolved_strategy),
             "web_search": web_search,
             "pages": pages,
             "social_search": social,
             "social_error": social_error,
             "citations": citations,
-            "evidence": {
-                "providers_consulted": providers_consulted,
-                "web_result_count": len(candidate_results),
-                "page_count": len([page for page in pages if not page.get("error")]),
-                "citation_count": len(citations),
-                "verification": "cross-provider"
-                if web_provider == "hybrid" or len(providers_consulted) > 1
-                else "single-provider",
-            },
+            "evidence": evidence,
             "notes": [
                 "默认用 Tavily 做发现，Firecrawl 做正文抓取，X 搜索走 xAI Responses API",
                 "如果某个 provider 没配 key，会保留错误并尽量返回其余部分",
             ],
         }
+
+    def _resolve_research_plan(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        strategy: SearchStrategy,
+        web_max_results: int,
+        social_max_results: int,
+        scrape_top_n: int,
+        include_social: bool,
+        include_domains: list[str] | None,
+    ) -> dict[str, Any]:
+        web_mode = "news" if mode == "news" else ("docs" if mode in {"docs", "github", "pdf"} else "web")
+        planned_web_max = web_max_results
+        planned_social_max = social_max_results if include_social else 0
+        planned_scrape_top_n = scrape_top_n
+
+        if mode in {"docs", "github", "pdf"} or self._should_use_strict_resource_policy(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_domains=include_domains,
+        ):
+            planned_web_max = max(planned_web_max, 4)
+            planned_scrape_top_n = max(1, min(planned_scrape_top_n, 2))
+        elif mode == "news" or intent in {"news", "status"}:
+            planned_web_max = min(max(planned_web_max, 6), 8)
+            planned_scrape_top_n = min(max(planned_scrape_top_n, 4), 5)
+            if include_social:
+                planned_social_max = min(max(planned_social_max, 4), 6)
+        elif intent in {"comparison", "exploratory"} or strategy in {"verify", "deep"}:
+            planned_web_max = min(max(planned_web_max, 6), 10)
+            planned_scrape_top_n = min(max(planned_scrape_top_n, 4), 5)
+            if include_social:
+                planned_social_max = min(max(planned_social_max, 3), 5)
+
+        return {
+            "web_mode": web_mode,
+            "web_max_results": planned_web_max,
+            "social_max_results": planned_social_max,
+            "scrape_top_n": planned_scrape_top_n,
+        }
+
+    def _candidate_result_budget(
+        self,
+        *,
+        requested_max_results: int,
+        strategy: SearchStrategy,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        include_domains: list[str] | None,
+        route_provider: str,
+    ) -> int:
+        if route_provider == "xai":
+            return requested_max_results
+
+        budget = requested_max_results
+        strategy_floor = {
+            "fast": requested_max_results,
+            "balanced": min(max(requested_max_results * 2, requested_max_results + 2), 10),
+            "verify": min(max(requested_max_results * 3, requested_max_results + 4), 15),
+            "deep": min(max(requested_max_results * 4, requested_max_results + 6), 20),
+        }
+        budget = max(budget, strategy_floor.get(strategy, requested_max_results))
+
+        if include_domains or self._should_rerank_resource_results(mode=mode, intent=intent):
+            budget = max(budget, min(max(requested_max_results * 2, requested_max_results + 3), 12))
+
+        return max(requested_max_results, budget)
+
+    def _trim_search_payload(self, result: dict[str, Any], *, max_results: int) -> dict[str, Any]:
+        trimmed = dict(result)
+        results = list(trimmed.get("results") or [])[:max_results]
+        trimmed["results"] = results
+        trimmed["citations"] = self._align_citations_with_results(
+            results=results,
+            citations=list(trimmed.get("citations") or []),
+        )
+        return trimmed
+
+    def _augment_evidence_summary(
+        self,
+        result: dict[str, Any],
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        include_domains: list[str] | None,
+    ) -> dict[str, Any]:
+        enriched = dict(result)
+        evidence = dict(enriched.get("evidence") or {})
+        results = list(enriched.get("results") or [])
+        citations = list(enriched.get("citations") or [])
+        official_mode = self._resolve_official_result_mode(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_domains=include_domains,
+        )
+        providers_consulted = [
+            item
+            for item in (
+                evidence.get("providers_consulted")
+                or [enriched.get("provider", "")]
+            )
+            if item
+        ]
+        evidence.setdefault("providers_consulted", providers_consulted)
+        evidence.setdefault(
+            "verification",
+            "cross-provider" if len(set(providers_consulted)) > 1 else "single-provider",
+        )
+        evidence.setdefault("citation_count", len(citations))
+        evidence.setdefault("official_mode", official_mode)
+        evidence.setdefault("official_filter_applied", False)
+
+        source_domains = self._collect_source_domains(results=results, citations=citations)
+        official_source_count = self._count_official_resource_results(
+            query=query,
+            mode=mode,
+            intent=intent,
+            results=results,
+            include_domains=include_domains,
+        )
+        conflicts = self._detect_evidence_conflicts(
+            mode=mode,
+            intent=intent,
+            results=results,
+            include_domains=include_domains,
+            source_domains=source_domains,
+            official_source_count=official_source_count,
+            providers_consulted=providers_consulted,
+            official_mode=str(evidence.get("official_mode") or official_mode),
+        )
+        evidence["source_diversity"] = len(source_domains)
+        evidence["source_domains"] = source_domains[:5]
+        evidence["official_source_count"] = official_source_count
+        evidence["third_party_source_count"] = max(len(results) - official_source_count, 0)
+        evidence["confidence"] = self._estimate_search_confidence(
+            mode=mode,
+            intent=intent,
+            result_count=len(results),
+            source_domain_count=len(source_domains),
+            official_source_count=official_source_count,
+            verification=str(evidence.get("verification") or "single-provider"),
+            conflicts=conflicts,
+            official_mode=str(evidence.get("official_mode") or official_mode),
+        )
+        evidence["conflicts"] = conflicts
+        enriched["evidence"] = evidence
+        return enriched
+
+    def _resolve_official_result_mode(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        include_domains: list[str] | None,
+    ) -> str:
+        if self._should_use_strict_resource_policy(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_domains=include_domains,
+        ):
+            return "strict"
+        if self._should_rerank_resource_results(mode=mode, intent=intent):
+            return "standard"
+        return "off"
+
+    def _should_use_strict_resource_policy(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        include_domains: list[str] | None,
+    ) -> bool:
+        query_lower = query.lower()
+        if include_domains:
+            return True
+        if mode in {"docs", "github", "pdf"}:
+            return True
+        if self._looks_like_official_query(query):
+            return True
+        if self._looks_like_pricing_query(query_lower):
+            return True
+        if self._looks_like_changelog_query(query_lower):
+            return True
+        if intent in {"resource", "tutorial"} and self._looks_like_docs_query(query_lower):
+            return True
+        return False
+
+    def _looks_like_official_query(self, query: str) -> bool:
+        query_lower = query.lower()
+        if re.search(r"\bofficial\b", query_lower):
+            return True
+        official_markers = (
+            "官网",
+            "官方",
+            "原文",
+            "定价官方",
+            "官方定价",
+            "官方价格",
+            "官方文档",
+        )
+        return any(marker in query for marker in official_markers)
+
+    def _looks_like_pricing_query(self, query_lower: str) -> bool:
+        keywords = [
+            "price",
+            "pricing",
+            "plans",
+            "subscription",
+            "费用",
+            "套餐",
+            "定价",
+            "价格",
+            "售价",
+        ]
+        return any(keyword in query_lower for keyword in keywords)
+
+    def _looks_like_changelog_query(self, query_lower: str) -> bool:
+        keywords = [
+            "changelog",
+            "release notes",
+            "what's new",
+            "whats new",
+            "更新日志",
+            "发布说明",
+            "变更日志",
+            "版本更新",
+        ]
+        return any(keyword in query_lower for keyword in keywords)
+
+    def _apply_official_resource_policy(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        result: dict[str, Any],
+        include_domains: list[str] | None,
+    ) -> dict[str, Any]:
+        enriched = dict(result)
+        results = list(enriched.get("results") or [])
+        citations = list(enriched.get("citations") or [])
+        official_mode = self._resolve_official_result_mode(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_domains=include_domains,
+        )
+        evidence = dict(enriched.get("evidence") or {})
+        evidence.setdefault("official_mode", official_mode)
+        evidence.setdefault("official_filter_applied", False)
+        evidence.setdefault("official_candidate_count", 0)
+        if official_mode == "off" or not results:
+            enriched["evidence"] = evidence
+            return enriched
+
+        official_candidates = self._collect_official_result_candidates(
+            query=query,
+            mode=mode,
+            results=results,
+            include_domains=include_domains,
+            strict_official=official_mode == "strict",
+        )
+        evidence["official_candidate_count"] = len(official_candidates)
+        if official_mode == "strict" and official_candidates:
+            evidence["official_filter_applied"] = len(official_candidates) < len(results)
+            enriched["results"] = official_candidates
+            enriched["citations"] = self._align_citations_with_results(
+                results=official_candidates,
+                citations=citations,
+            )
+        enriched["evidence"] = evidence
+        return enriched
+
+    def _collect_official_result_candidates(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        results: list[dict[str, Any]],
+        include_domains: list[str] | None,
+        strict_official: bool,
+    ) -> list[dict[str, Any]]:
+        query_tokens = self._query_brand_tokens(query)
+        candidates: list[dict[str, Any]] = []
+        for item in results:
+            if self._result_matches_official_policy(
+                item=item,
+                mode=mode,
+                query_tokens=query_tokens,
+                include_domains=include_domains,
+                strict_official=strict_official,
+            ):
+                candidates.append(dict(item))
+        return candidates
+
+    def _augment_research_evidence(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: str,
+        requested_page_count: int,
+        pages: list[dict[str, Any]],
+        citations: list[dict[str, Any]],
+        web_search: dict[str, Any],
+        social: dict[str, Any] | None,
+        social_error: str,
+        providers_consulted: list[str],
+        research_plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        successful_pages = [page for page in pages if not page.get("error")]
+        page_error_count = max(len(pages) - len(successful_pages), 0)
+        page_success_rate = (
+            round(len(successful_pages) / requested_page_count, 2)
+            if requested_page_count > 0
+            else 0.0
+        )
+        web_evidence = dict(web_search.get("evidence") or {})
+        source_domains = self._collect_source_domains(
+            results=successful_pages,
+            citations=citations,
+        )
+        conflicts = list(web_evidence.get("conflicts") or [])
+        if requested_page_count and not successful_pages:
+            conflicts.append("page-extraction-unavailable")
+        elif requested_page_count and page_error_count > 0:
+            conflicts.append("page-extraction-partial")
+        if social_error:
+            conflicts.append("social-search-unavailable")
+
+        official_mode = str(
+            web_evidence.get("official_mode")
+            or self._resolve_official_result_mode(
+                query=query,
+                mode=mode,
+                intent=str(intent) if isinstance(intent, str) else "factual",
+                include_domains=None,
+            )
+        )
+        confidence = self._estimate_research_confidence(
+            search_confidence=str(web_evidence.get("confidence") or "low"),
+            page_success_count=len(successful_pages),
+            requested_page_count=requested_page_count,
+            social_present=social is not None,
+            social_error=bool(social_error),
+            conflicts=conflicts,
+        )
+        return {
+            "providers_consulted": providers_consulted,
+            "web_result_count": len(web_search.get("results") or []),
+            "page_count": len(successful_pages),
+            "page_error_count": page_error_count,
+            "page_success_rate": page_success_rate,
+            "citation_count": len(citations),
+            "verification": "cross-provider"
+            if web_search.get("provider") == "hybrid" or len(providers_consulted) > 1
+            else "single-provider",
+            "source_diversity": len(source_domains),
+            "source_domains": source_domains[:5],
+            "official_source_count": int(web_evidence.get("official_source_count") or 0),
+            "official_mode": official_mode,
+            "search_confidence": str(web_evidence.get("confidence") or "low"),
+            "confidence": confidence,
+            "conflicts": conflicts,
+            "research_plan": research_plan,
+        }
+
+    def _estimate_research_confidence(
+        self,
+        *,
+        search_confidence: str,
+        page_success_count: int,
+        requested_page_count: int,
+        social_present: bool,
+        social_error: bool,
+        conflicts: list[str],
+    ) -> str:
+        if "strict-official-unmet" in conflicts or "page-extraction-unavailable" in conflicts:
+            return "low"
+        if search_confidence == "high" and page_success_count > 0 and not social_error:
+            return "high"
+        if search_confidence in {"high", "medium"} and (
+            page_success_count > 0 or requested_page_count <= 0 or not social_present
+        ):
+            return "medium"
+        if search_confidence == "high":
+            return "medium"
+        return "low" if conflicts else "medium"
 
     def _should_request_search_answer(
         self,
@@ -966,35 +1567,59 @@ class MySearchClient:
         provider: ProviderName,
         sources: list[str] | None,
         include_content: bool,
+        include_domains: list[str] | None,
         allowed_x_handles: list[str] | None,
         excluded_x_handles: list[str] | None,
     ) -> RouteDecision:
         normalized_sources = sorted(set(sources or ["web"]))
-        query_lower = query.lower()
+        policy = self._route_policy_for_request(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_content=include_content,
+        )
 
         if provider != "auto":
             if provider == "tavily":
                 return RouteDecision(
                     provider="tavily",
                     reason="显式指定 Tavily",
-                    tavily_topic="news" if mode == "news" or intent in {"news", "status"} else "general",
+                    tavily_topic=policy.tavily_topic,
+                    fallback_chain=self._explicit_provider_fallback_chain(
+                        provider=provider,
+                        policy=policy,
+                    ),
+                    result_profile=policy.result_profile,
+                    allow_exa_rescue=policy.allow_exa_rescue and policy.provider == "tavily",
                 )
             if provider == "firecrawl":
                 return RouteDecision(
                     provider="firecrawl",
                     reason="显式指定 Firecrawl",
-                    firecrawl_categories=self._firecrawl_categories(mode, intent),
+                    firecrawl_categories=list(policy.firecrawl_categories)
+                    or self._firecrawl_categories(mode, intent),
+                    fallback_chain=self._explicit_provider_fallback_chain(
+                        provider=provider,
+                        policy=policy,
+                    ),
+                    result_profile=policy.result_profile,
                 )
             if provider == "exa":
                 return RouteDecision(
                     provider="exa",
                     reason="显式指定 Exa",
+                    fallback_chain=self._explicit_provider_fallback_chain(
+                        provider=provider,
+                        policy=policy,
+                    ),
+                    result_profile=policy.result_profile,
                 )
             if provider == "xai":
                 return RouteDecision(
                     provider="xai",
                     reason="显式指定 xAI/X 搜索",
                     sources=normalized_sources,
+                    result_profile="off",
                 )
 
         if normalized_sources == ["web", "x"] or (
@@ -1007,6 +1632,7 @@ class MySearchClient:
                 provider="xai",
                 reason="社交舆情 / X 搜索更适合走 xAI",
                 sources=["x"],
+                result_profile="off",
             )
 
         if allowed_x_handles or excluded_x_handles:
@@ -1014,139 +1640,47 @@ class MySearchClient:
                 provider="xai",
                 reason="检测到 X handle 过滤条件",
                 sources=["x"],
+                result_profile="off",
             )
+        if policy.key in {"docs", "resource"} and include_domains and self._domains_prefer_firecrawl_discovery(include_domains):
+            reason = "检测到受限 / 社区域名，优先用 Firecrawl 做站内发现"
+        elif policy.key in {"docs", "github", "pdf"}:
+            reason = "文档 / GitHub / PDF 默认走 Firecrawl，页面发现与正文抓取保持一致"
+        elif policy.key == "content":
+            reason = "请求里需要正文内容，优先走 Firecrawl"
+        elif policy.key == "news":
+            reason = "状态 / 新闻类查询默认走 Tavily"
+        elif policy.key == "resource":
+            reason = "resource / docs 查询默认走 Firecrawl"
+        elif policy.key == "research":
+            reason = "research 发现阶段默认走 Tavily"
+        else:
+            reason = "普通网页检索默认走 Tavily"
+        return self._decision_from_policy(policy=policy, reason=reason)
 
-        if mode in {"docs", "github", "pdf"}:
-            if include_content:
-                if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
-                    self.config.exa
-                ):
-                    return RouteDecision(
-                        provider="exa",
-                        reason="Firecrawl 未配置，文档正文查询回退到 Exa",
-                    )
-                return RouteDecision(
-                    provider="firecrawl",
-                    reason="文档正文查询优先走 Firecrawl",
-                    firecrawl_categories=self._firecrawl_categories(mode, intent),
-                )
-            if self._provider_can_serve(self.config.tavily):
-                return RouteDecision(
-                    provider="tavily",
-                    reason="文档类查询先用 Tavily 做官方页面发现，正文再交给 Firecrawl",
-                    tavily_topic="general",
-                )
-            if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
-                self.config.exa
+    def _domains_prefer_firecrawl_discovery(self, include_domains: list[str] | None) -> bool:
+        if not include_domains:
+            return False
+        firecrawl_preferred_domains = {
+            "dev.to",
+            "juejin.cn",
+            "linux.do",
+            "medium.com",
+            "mp.weixin.qq.com",
+            "notion.site",
+            "notion.so",
+            "substack.com",
+            "weixin.qq.com",
+            "zhihu.com",
+        }
+        for domain in include_domains:
+            cleaned_domain = self._clean_hostname(domain)
+            if any(
+                self._domain_matches(cleaned_domain, preferred)
+                for preferred in firecrawl_preferred_domains
             ):
-                return RouteDecision(
-                    provider="exa",
-                    reason="Firecrawl 未配置，文档类查询回退到 Exa",
-                )
-            return RouteDecision(
-                provider="firecrawl",
-                reason="文档 / GitHub / PDF 内容优先走 Firecrawl",
-                firecrawl_categories=self._firecrawl_categories(mode, intent),
-            )
-
-        if include_content:
-            if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
-                self.config.exa
-            ):
-                return RouteDecision(
-                    provider="exa",
-                    reason="Firecrawl 未配置，正文查询回退到 Exa",
-                )
-            return RouteDecision(
-                provider="firecrawl",
-                reason="请求里需要正文内容，优先用 Firecrawl search + scrape",
-                firecrawl_categories=self._firecrawl_categories(mode, intent),
-            )
-
-        if intent in {"news", "status"} or mode == "news" or self._looks_like_news_query(query_lower):
-            if not self._provider_can_serve(self.config.tavily) and self._provider_can_serve(
-                self.config.exa
-            ):
-                return RouteDecision(
-                    provider="exa",
-                    reason="Tavily 未配置，新闻 / 状态类查询回退到 Exa",
-                )
-            return RouteDecision(
-                provider="tavily",
-                reason="状态 / 新闻类查询默认走 Tavily",
-                tavily_topic="news",
-            )
-
-        if intent == "resource" or self._looks_like_docs_query(query_lower):
-            if include_content:
-                if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
-                    self.config.exa
-                ):
-                    return RouteDecision(
-                        provider="exa",
-                        reason="Firecrawl 未配置，resource 正文查询回退到 Exa",
-                    )
-                return RouteDecision(
-                    provider="firecrawl",
-                    reason="resource / docs 正文查询优先走 Firecrawl",
-                    firecrawl_categories=self._firecrawl_categories("docs", intent),
-                )
-            if self._provider_can_serve(self.config.tavily):
-                return RouteDecision(
-                    provider="tavily",
-                    reason="resource / docs 查询先用 Tavily 做页面发现，正文再交给 Firecrawl",
-                    tavily_topic="general",
-                )
-            if not self._provider_can_serve(self.config.firecrawl) and self._provider_can_serve(
-                self.config.exa
-            ):
-                return RouteDecision(
-                    provider="exa",
-                    reason="Firecrawl 未配置，resource / docs 类查询回退到 Exa",
-                )
-            return RouteDecision(
-                provider="firecrawl",
-                reason="resource / docs 类查询优先走 Firecrawl",
-                firecrawl_categories=self._firecrawl_categories("docs", intent),
-            )
-
-        if mode == "research":
-            if self._provider_can_serve(self.config.tavily):
-                return RouteDecision(
-                    provider="tavily",
-                    reason="research 模式先用 Tavily 做发现，再按策略决定是否扩展验证",
-                    tavily_topic="general",
-                )
-            if self._provider_can_serve(self.config.exa):
-                return RouteDecision(
-                    provider="exa",
-                    reason="Tavily 未配置，research 发现阶段回退到 Exa",
-                )
-            if self._provider_can_serve(self.config.firecrawl):
-                return RouteDecision(
-                    provider="firecrawl",
-                    reason="Tavily / Exa 未配置，research 发现阶段回退到 Firecrawl",
-                    firecrawl_categories=self._firecrawl_categories(mode, intent),
-                )
-            return RouteDecision(
-                provider="tavily",
-                reason="research 模式默认走 Tavily（无可用替代）",
-                tavily_topic="general",
-            )
-
-        if not self._provider_can_serve(self.config.tavily) and self._provider_can_serve(
-            self.config.exa
-        ):
-            return RouteDecision(
-                provider="exa",
-                reason="Tavily 未配置，普通网页检索回退到 Exa",
-            )
-
-        return RouteDecision(
-            provider="tavily",
-            reason="普通网页检索默认走 Tavily",
-            tavily_topic="general",
-        )
+                return True
+        return False
 
     def _resolve_intent(
         self,
@@ -1204,6 +1738,81 @@ class MySearchClient:
             return "balanced"
         return "fast"
 
+    def _route_policy_for_request(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        include_content: bool,
+    ) -> SearchRoutePolicy:
+        query_lower = query.lower()
+        if mode == "research":
+            return _MODE_PROVIDER_POLICY["research"]
+        if include_content:
+            return _MODE_PROVIDER_POLICY["content"]
+        if mode in {"docs", "github", "pdf"}:
+            return _MODE_PROVIDER_POLICY[mode]
+        if intent in {"resource", "tutorial"} or self._looks_like_docs_query(query_lower):
+            return _MODE_PROVIDER_POLICY["resource"]
+        if intent in {"news", "status"} or mode == "news" or self._looks_like_news_query(query_lower):
+            return _MODE_PROVIDER_POLICY["news"]
+        return _MODE_PROVIDER_POLICY["web"]
+
+    def _decision_from_policy(
+        self,
+        *,
+        policy: SearchRoutePolicy,
+        reason: str,
+        sources: list[str] | None = None,
+    ) -> RouteDecision:
+        provider, fallback_chain = self._resolve_available_policy_chain(policy=policy)
+        return RouteDecision(
+            provider=provider,
+            reason=reason,
+            tavily_topic=policy.tavily_topic,
+            firecrawl_categories=list(policy.firecrawl_categories) or None,
+            sources=sources,
+            fallback_chain=fallback_chain,
+            result_profile=policy.result_profile,
+            allow_exa_rescue=policy.allow_exa_rescue,
+        )
+
+    def _resolve_available_policy_chain(
+        self,
+        *,
+        policy: SearchRoutePolicy,
+    ) -> tuple[ProviderName, list[str] | None]:
+        ordered: list[ProviderName] = [policy.provider, *policy.fallback_chain]
+        available: list[ProviderName] = []
+        for provider_name in ordered:
+            config = self._provider_config_for_name(provider_name)
+            if self._provider_can_serve(config):
+                available.append(provider_name)
+        if not available:
+            return policy.provider, list(policy.fallback_chain) or None
+        return available[0], list(available[1:]) or None
+
+    def _provider_config_for_name(self, provider_name: ProviderName) -> ProviderConfig:
+        if provider_name == "tavily":
+            return self.config.tavily
+        if provider_name == "firecrawl":
+            return self.config.firecrawl
+        if provider_name == "exa":
+            return self.config.exa
+        return self.config.xai
+
+    def _explicit_provider_fallback_chain(
+        self,
+        *,
+        provider: ProviderName,
+        policy: SearchRoutePolicy,
+    ) -> list[str] | None:
+        if provider == "xai":
+            return None
+        chain = [item for item in policy.fallback_chain if item != provider]
+        return list(chain) or None
+
     def _should_blend_web_providers(
         self,
         *,
@@ -1211,6 +1820,9 @@ class MySearchClient:
         decision: RouteDecision,
         sources: list[str],
         strategy: SearchStrategy,
+        mode: SearchMode = "auto",
+        intent: ResolvedSearchIntent = "factual",
+        include_domains: list[str] | None = None,
     ) -> bool:
         if requested_provider != "auto":
             return False
@@ -1220,19 +1832,17 @@ class MySearchClient:
             return False
         if "x" in sources:
             return False
+        if mode == "news" or intent in {"news", "status"}:
+            return False
+        if include_domains:
+            return False
+        if mode in {"docs", "github", "pdf"}:
+            return False
+        if intent in {"resource", "tutorial"}:
+            return False
         return self._provider_can_serve(self.config.tavily) and self._provider_can_serve(
             self.config.firecrawl
         )
-
-    # ------------------------------------------------------------------
-    # Provider-level fallback: if the chosen provider fails, try others
-    # ------------------------------------------------------------------
-
-    _SEARCH_FALLBACK_CHAIN: dict[str, list[str]] = {
-        "tavily": ["exa", "firecrawl"],
-        "firecrawl": ["exa", "tavily"],
-        "exa": ["firecrawl", "tavily"],
-    }
 
     def _search_with_fallback(
         self,
@@ -1248,8 +1858,7 @@ class MySearchClient:
         include_domains: list[str] | None,
         exclude_domains: list[str] | None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-        """Try the primary provider; on failure, walk the fallback chain."""
-        chain = [primary_provider] + self._SEARCH_FALLBACK_CHAIN.get(primary_provider, [])
+        chain = [primary_provider, *(decision.fallback_chain or [])]
         last_error: Exception | None = None
         for provider_name in chain:
             try:
@@ -1279,9 +1888,7 @@ class MySearchClient:
             except Exception as exc:
                 last_error = MySearchError(f"{provider_name}: {exc}")
                 continue
-        raise MySearchError(
-            f"All providers failed for query '{query[:80]}': {last_error}"
-        )
+        raise MySearchError(f"All providers failed for query '{query[:80]}': {last_error}")
 
     def _dispatch_single_provider(
         self,
@@ -1297,7 +1904,6 @@ class MySearchClient:
         include_domains: list[str] | None,
         exclude_domains: list[str] | None,
     ) -> dict[str, Any]:
-        """Call exactly one search provider by name."""
         if provider_name == "tavily":
             return self._search_tavily(
                 query=query,
@@ -1326,6 +1932,246 @@ class MySearchClient:
                 include_content=include_content,
             )
         raise MySearchError(f"Unknown provider: {provider_name}")
+
+    def _should_attempt_exa_rescue(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        decision: RouteDecision,
+        result: dict[str, Any],
+        max_results: int,
+        include_domains: list[str] | None,
+    ) -> bool:
+        if not decision.allow_exa_rescue:
+            return False
+        if not self._provider_can_serve(self.config.exa):
+            return False
+        if result.get("provider") in {"exa", "xai"}:
+            return False
+        if result.get("fallback"):
+            return False
+        if include_domains or self._resolve_official_result_mode(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_domains=include_domains,
+        ) == "strict":
+            return False
+        results = list(result.get("results") or [])
+        if len(results) >= min(max_results, 3):
+            return False
+        query_terms = re.findall(r"[a-z0-9\u4e00-\u9fff]+", query.lower())
+        long_tail_signal = len(query_terms) >= 6 or len(query) >= 48
+        return mode == "news" or intent in {"comparison", "exploratory", "tutorial"} or long_tail_signal
+
+    def _apply_exa_rescue(
+        self,
+        *,
+        query: str,
+        primary_result: dict[str, Any],
+        max_results: int,
+        include_domains: list[str] | None,
+        exclude_domains: list[str] | None,
+        include_content: bool,
+    ) -> dict[str, Any]:
+        exa_result = self._search_exa(
+            query=query,
+            max_results=max_results,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            include_content=include_content,
+        )
+        if not exa_result.get("results"):
+            return primary_result
+
+        merged = self._merge_search_payloads(
+            primary_result=primary_result,
+            secondary_result=exa_result,
+            max_results=max_results,
+        )
+        return {
+            "provider": "hybrid",
+            "route_selected": f"{primary_result.get('provider', 'unknown')}+exa",
+            "query": query,
+            "answer": primary_result.get("answer") or exa_result.get("answer", ""),
+            "results": merged["results"],
+            "citations": merged["citations"],
+            "evidence": {
+                "providers_consulted": [
+                    item
+                    for item in [primary_result.get("provider"), exa_result.get("provider")]
+                    if item
+                ],
+                "matched_results": merged["matched_results"],
+                "citation_count": len(merged["citations"]),
+                "verification": "fallback",
+            },
+            "primary_search": primary_result,
+            "secondary_search": exa_result,
+            "secondary_error": "",
+            "fallback": {
+                "from": primary_result.get("provider", "unknown"),
+                "to": "exa",
+                "reason": "primary provider returned sparse results; Exa rescue engaged",
+            },
+        }
+
+    def _should_rerank_general_results(
+        self,
+        *,
+        result_profile: str,
+    ) -> bool:
+        return result_profile in {"web", "news"}
+
+    def _rerank_general_results(
+        self,
+        *,
+        query: str,
+        result_profile: Literal["web", "news"],
+        results: list[dict[str, Any]],
+        include_domains: list[str] | None,
+    ) -> list[dict[str, Any]]:
+        if len(results) < 2:
+            return results
+        ranked = sorted(
+            enumerate(results),
+            key=lambda pair: (
+                self._general_result_rank(
+                    query=query,
+                    result_profile=result_profile,
+                    item=pair[1],
+                    include_domains=include_domains,
+                ),
+                -pair[0],
+            ),
+            reverse=True,
+        )
+        return [dict(pair[1]) for pair in ranked]
+
+    def _general_result_rank(
+        self,
+        *,
+        query: str,
+        result_profile: Literal["web", "news"],
+        item: dict[str, Any],
+        include_domains: list[str] | None,
+    ) -> tuple[int, int, int, int, int, int, int, int]:
+        if result_profile == "news":
+            return self._news_result_rank(item=item, include_domains=include_domains)
+        return self._web_result_rank(
+            query=query,
+            item=item,
+            include_domains=include_domains,
+        )
+
+    def _news_result_rank(
+        self,
+        *,
+        item: dict[str, Any],
+        include_domains: list[str] | None,
+    ) -> tuple[int, int, int, int, int, int, int, int]:
+        hostname = self._result_hostname(item)
+        include_match = int(
+            bool(include_domains)
+            and any(self._domain_matches(hostname, domain) for domain in include_domains or [])
+        )
+        mainstream = int(self._is_mainstream_news_domain(hostname))
+        article_shape = int(self._looks_like_news_article_result(item))
+        has_timestamp = int(self._result_published_timestamp(item) is not None)
+        timestamp_score = int(self._result_published_timestamp(item) or 0)
+        content_score, snippet_score, title_score = self._result_quality_score(item)
+        return (
+            include_match,
+            mainstream,
+            article_shape,
+            has_timestamp,
+            timestamp_score,
+            content_score,
+            snippet_score,
+            title_score,
+        )
+
+    def _web_result_rank(
+        self,
+        *,
+        query: str,
+        item: dict[str, Any],
+        include_domains: list[str] | None,
+    ) -> tuple[int, int, int, int, int, int, int, int]:
+        hostname = self._result_hostname(item)
+        registered_domain = self._registered_domain(hostname)
+        title_text = (item.get("title") or "").lower()
+        query_tokens = self._query_brand_tokens(query)
+        include_match = int(
+            bool(include_domains)
+            and any(self._domain_matches(hostname, domain) for domain in include_domains or [])
+        )
+        registered_domain_label_match = int(
+            self._registered_domain_label_matches(
+                registered_domain=registered_domain,
+                query_tokens=query_tokens,
+            )
+        )
+        host_brand_match = int(any(token in hostname for token in query_tokens))
+        title_brand_match = int(any(token in title_text for token in query_tokens))
+        non_aggregator = int(not self._is_obvious_web_aggregator(registered_domain))
+        matched_provider_count = len(item.get("matched_providers") or [])
+        content_score, snippet_score, title_score = self._result_quality_score(item)
+        return (
+            include_match,
+            registered_domain_label_match,
+            host_brand_match,
+            title_brand_match,
+            non_aggregator,
+            matched_provider_count,
+            content_score,
+            max(snippet_score, title_score),
+        )
+
+    def _result_published_timestamp(self, item: dict[str, Any]) -> float | None:
+        for field in ("published_date", "publishedDate", "created_at"):
+            parsed = self._parse_result_timestamp(item.get(field))
+            if parsed is not None:
+                return parsed.timestamp()
+        return None
+
+    def _is_mainstream_news_domain(self, hostname: str) -> bool:
+        registered_domain = self._registered_domain(hostname)
+        mainstream_domains = {
+            "apnews.com",
+            "bbc.com",
+            "bloomberg.com",
+            "cnn.com",
+            "ft.com",
+            "latimes.com",
+            "nytimes.com",
+            "reuters.com",
+            "theguardian.com",
+            "theverge.com",
+            "washingtonpost.com",
+            "wsj.com",
+            "xinhuanet.com",
+        }
+        return registered_domain in mainstream_domains
+
+    def _looks_like_news_article_result(self, item: dict[str, Any]) -> bool:
+        path = urlparse(item.get("url", "")).path.lower()
+        return any(
+            marker in path
+            for marker in ("/news/", "/story/", "/stories/", "/article/", "/articles/", "/202")
+        )
+
+    def _is_obvious_web_aggregator(self, registered_domain: str) -> bool:
+        return registered_domain in {
+            "linkedin.com",
+            "medium.com",
+            "quora.com",
+            "reddit.com",
+            "researchgate.net",
+            "stackoverflow.com",
+        }
 
     def _search_web_blended(
         self,
@@ -1383,12 +2229,10 @@ class MySearchClient:
             }
 
         blended_results, blended_errors = self._execute_parallel(tasks, max_workers=2)
-
         primary_failed = "primary" in blended_errors
         secondary_failed = "secondary" in blended_errors
 
         if primary_failed and not secondary_failed:
-            # Primary down but secondary succeeded — use secondary as sole result
             primary_result = blended_results["secondary"]
             primary_result["fallback"] = {
                 "from": decision.provider,
@@ -1398,7 +2242,6 @@ class MySearchClient:
             secondary_result = None
             secondary_error = ""
         elif primary_failed and secondary_failed:
-            # Both failed — raise with context from both
             primary_err = str(blended_errors["primary"])[:150]
             secondary_err = str(blended_errors["secondary"])[:150]
             raise MySearchError(
@@ -1459,6 +2302,55 @@ class MySearchClient:
         include_domains: list[str] | None,
         exclude_domains: list[str] | None,
     ) -> dict[str, Any]:
+        include_domains = [item.strip() for item in (include_domains or []) if item and item.strip()]
+        exclude_domains = [item.strip() for item in (exclude_domains or []) if item and item.strip()]
+
+        response = self._search_tavily_once(
+            query=query,
+            max_results=max_results,
+            topic=topic,
+            include_answer=include_answer,
+            include_content=include_content,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+        )
+        if response.get("results") or not include_domains:
+            return response
+
+        retry_response = self._search_tavily_domain_retry(
+            query=query,
+            max_results=max_results,
+            topic=topic,
+            include_content=include_content,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+        )
+        if retry_response is not None:
+            return retry_response
+
+        fallback_response = self._search_tavily_domain_fallback(
+            query=query,
+            max_results=max_results,
+            include_content=include_content,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+        )
+        if fallback_response is not None:
+            return fallback_response
+
+        return response
+
+    def _search_tavily_once(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        topic: str,
+        include_answer: bool,
+        include_content: bool,
+        include_domains: list[str] | None,
+        exclude_domains: list[str] | None,
+    ) -> dict[str, Any]:
         provider = self.config.tavily
         key = self._get_key_or_raise(provider)
         payload: dict[str, Any] = {
@@ -1481,6 +2373,28 @@ class MySearchClient:
             payload=payload,
             key=key.key,
         )
+        results = [
+            {
+                "provider": "tavily",
+                "source": "web",
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("content", ""),
+                "content": item.get("raw_content", "") if include_content else "",
+                "score": item.get("score"),
+                "published_date": item.get("published_date")
+                or item.get("publishedDate")
+                or item.get("published_at")
+                or item.get("publishedAt")
+                or "",
+            }
+            for item in response.get("results", [])
+        ]
+        filtered_results = self._filter_results_by_domains(
+            results,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+        )
         return {
             "provider": "tavily",
             "transport": key.source,
@@ -1488,23 +2402,172 @@ class MySearchClient:
             "answer": response.get("answer", ""),
             "request_id": response.get("request_id", ""),
             "response_time": response.get("response_time"),
-            "results": [
-                {
-                    "provider": "tavily",
-                    "source": "web",
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("content", ""),
-                    "content": item.get("raw_content", "") if include_content else "",
-                    "score": item.get("score"),
-                }
-                for item in response.get("results", [])
-            ],
+            "results": filtered_results,
             "citations": [
                 {"title": item.get("title", ""), "url": item.get("url", "")}
-                for item in response.get("results", [])
+                for item in filtered_results
                 if item.get("url")
             ],
+        }
+
+    def _search_tavily_domain_retry(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        topic: str,
+        include_content: bool,
+        include_domains: list[str],
+        exclude_domains: list[str] | None,
+    ) -> dict[str, Any] | None:
+        per_domain_results = []
+        retried_domains: list[str] = []
+        for domain in include_domains:
+            domain_result = self._search_tavily_once(
+                query=self._build_firecrawl_domain_query(
+                    query=query,
+                    include_domain=domain,
+                    exclude_domains=exclude_domains,
+                ),
+                max_results=max_results,
+                topic=topic,
+                include_answer=False,
+                include_content=include_content,
+                include_domains=None,
+                exclude_domains=exclude_domains,
+            )
+            filtered_results = self._filter_results_by_domains(
+                domain_result.get("results", []),
+                include_domains=[domain],
+                exclude_domains=exclude_domains,
+            )
+            if not filtered_results:
+                continue
+            domain_result = dict(domain_result)
+            domain_result["results"] = filtered_results
+            domain_result["citations"] = self._align_citations_with_results(
+                results=filtered_results,
+                citations=list(domain_result.get("citations") or []),
+            )
+            per_domain_results.append(domain_result)
+            retried_domains.append(domain)
+
+        if not per_domain_results:
+            return None
+
+        merged_results = self._merge_ranked_results(
+            [result.get("results", []) for result in per_domain_results],
+            max_results=max_results,
+        )
+        citations = self._align_citations_with_results(
+            results=merged_results,
+            citations=self._dedupe_citations(
+                *[result.get("citations", []) for result in per_domain_results]
+            ),
+        )
+        return {
+            "provider": "tavily",
+            "transport": per_domain_results[0].get("transport", "env"),
+            "query": query,
+            "answer": "",
+            "request_id": "",
+            "response_time": None,
+            "results": merged_results,
+            "citations": citations,
+            "route_debug": {
+                "domain_filter_mode": "site_query_retry",
+                "retried_include_domains": retried_domains,
+            },
+        }
+
+    def _search_tavily_domain_fallback(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        include_content: bool,
+        include_domains: list[str],
+        exclude_domains: list[str] | None,
+    ) -> dict[str, Any] | None:
+        if not self._provider_can_serve(self.config.firecrawl):
+            return None
+
+        categories = (
+            self._firecrawl_categories("docs", "resource")
+            if self._looks_like_docs_query(query.lower()) or self._looks_like_tutorial_query(query.lower())
+            else []
+        )
+        per_domain_results = []
+        citations = []
+        seen_urls: set[str] = set()
+        for domain in include_domains:
+            domain_result = self._search_firecrawl_once(
+                query=self._build_firecrawl_domain_query(
+                    query=query,
+                    include_domain=domain,
+                    exclude_domains=exclude_domains,
+                ),
+                max_results=max_results,
+                categories=categories,
+                include_content=include_content,
+            )
+            if not domain_result.get("results"):
+                retry_result = self._search_firecrawl_domain_retry(
+                    query=query,
+                    max_results=max_results,
+                    categories=categories,
+                    include_content=include_content,
+                    include_domain=domain,
+                    exclude_domains=exclude_domains,
+                )
+                if retry_result is not None:
+                    domain_result = retry_result
+            per_domain_results.append(domain_result)
+            for item in domain_result.get("results", []):
+                url = item.get("url", "")
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                citations.append({"title": item.get("title", ""), "url": url})
+
+        merged_results = self._merge_ranked_results(
+            [result.get("results", []) for result in per_domain_results],
+            max_results=max_results,
+        )
+        if not merged_results:
+            return None
+
+        return {
+            "provider": "hybrid",
+            "route_selected": "tavily+firecrawl",
+            "query": query,
+            "answer": "",
+            "results": merged_results,
+            "citations": citations[:max_results],
+            "primary_search": {
+                "provider": "tavily",
+                "query": query,
+                "results": [],
+                "citations": [],
+            },
+            "secondary_search": {
+                "provider": "firecrawl",
+                "query": query,
+                "results": merged_results,
+                "citations": citations[:max_results],
+            },
+            "secondary_error": "",
+            "evidence": {
+                "providers_consulted": ["tavily", "firecrawl"],
+                "matched_results": 0,
+                "citation_count": len(citations[:max_results]),
+                "verification": "fallback",
+            },
+            "fallback": {
+                "from": "tavily",
+                "to": "firecrawl",
+                "reason": "tavily returned 0 results for domain-filtered search",
+            },
         }
 
     def _search_firecrawl(
@@ -1734,6 +2797,10 @@ class MySearchClient:
                         "url": item.get("url", ""),
                         "snippet": item.get("description", "") or item.get("markdown", ""),
                         "content": item.get("markdown", "") if include_content else "",
+                        "published_date": item.get("publishedDate")
+                        or item.get("published_date")
+                        or item.get("published_at")
+                        or "",
                     }
                 )
 
@@ -2213,6 +3280,7 @@ class MySearchClient:
         to_date: str | None,
         include_x_images: bool,
         include_x_videos: bool,
+        model: str | None = None,
     ) -> dict[str, Any]:
         tools: list[dict[str, Any]] = []
         if "web" in sources:
@@ -2244,7 +3312,7 @@ class MySearchClient:
 
         augmented_query = f"{query}\n\nReturn up to {max_results} relevant results with concise sourcing."
         return {
-            "model": self.config.xai_model,
+            "model": (model or self.config.xai_model).strip(),
             "input": [
                 {
                     "role": "user",
@@ -2528,6 +3596,7 @@ class MySearchClient:
             return results
 
         query_tokens = self._query_brand_tokens(query)
+        strict_official = bool(include_domains) or self._looks_like_official_query(query)
         ranked = sorted(
             enumerate(results),
             key=lambda pair: (
@@ -2536,6 +3605,7 @@ class MySearchClient:
                     item=pair[1],
                     query_tokens=query_tokens,
                     include_domains=include_domains,
+                    strict_official=strict_official,
                 ),
                 -pair[0],
             ),
@@ -2550,43 +3620,44 @@ class MySearchClient:
         item: dict[str, Any],
         query_tokens: list[str],
         include_domains: list[str] | None,
-    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int]:
-        url = item.get("url", "")
-        hostname = self._result_hostname(item)
-        registered_domain = self._registered_domain(hostname)
-        title_text = (item.get("title") or "").lower()
-        include_match = int(
-            bool(include_domains)
-            and any(self._domain_matches(hostname, domain) for domain in include_domains or [])
+        strict_official: bool,
+    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int, int]:
+        flags = self._resource_result_flags(
+            mode=mode,
+            item=item,
+            query_tokens=query_tokens,
+            include_domains=include_domains,
         )
-        host_brand_match = int(
-            any(token in hostname or token in registered_domain for token in query_tokens)
-        )
-        title_brand_match = int(any(token in title_text for token in query_tokens))
-        docs_shape_match = int(
-            self._looks_like_resource_result(
-                url=url,
-                hostname=hostname,
-                title_text=title_text,
-                mode=mode,
-            )
-        )
+        include_match = int(flags["include_match"])
+        host_brand_match = int(flags["host_brand_match"])
+        registered_domain_label_match = int(flags["registered_domain_label_match"])
+        title_brand_match = int(flags["title_brand_match"])
+        docs_shape_match = int(flags["docs_shape_match"])
         github_bonus = int(
             mode == "github"
-            and hostname in {"github.com", "raw.githubusercontent.com"}
+            and flags["hostname"] in {"github.com", "raw.githubusercontent.com"}
         )
-        pdf_bonus = int(mode == "pdf" and self._looks_like_pdf_url(url))
-        non_third_party = int(
-            not self._is_obvious_third_party_resource(
-                hostname=hostname,
-                registered_domain=registered_domain,
+        pdf_bonus = int(mode == "pdf" and self._looks_like_pdf_url(item.get("url", "")))
+        non_third_party = int(flags["non_third_party"])
+        official_resource_match = int(
+            self._is_probably_official_resource_result(
                 mode=mode,
+                hostname=str(flags["hostname"]),
+                include_match=bool(include_match),
+                registered_domain_label_match=bool(registered_domain_label_match),
+                host_brand_match=bool(host_brand_match),
+                title_brand_match=bool(title_brand_match),
+                docs_shape_match=bool(docs_shape_match),
+                non_third_party=bool(non_third_party),
+                official_query=strict_official,
             )
         )
         matched_provider_count = len(item.get("matched_providers") or [])
         content_score, snippet_score, title_score = self._result_quality_score(item)
         return (
             include_match,
+            official_resource_match,
+            registered_domain_label_match,
             github_bonus,
             pdf_bonus,
             host_brand_match,
@@ -2597,6 +3668,38 @@ class MySearchClient:
             content_score,
             snippet_score,
             title_score,
+        )
+
+    def _is_probably_official_resource_result(
+        self,
+        *,
+        mode: SearchMode,
+        hostname: str,
+        include_match: bool,
+        registered_domain_label_match: bool,
+        host_brand_match: bool,
+        title_brand_match: bool,
+        docs_shape_match: bool,
+        non_third_party: bool,
+        official_query: bool,
+    ) -> bool:
+        if include_match:
+            return True
+        if mode in {"github", "pdf"}:
+            return True
+        if not non_third_party:
+            return False
+        if official_query and registered_domain_label_match:
+            return True
+        if not docs_shape_match:
+            return False
+        official_host_surface = any(
+            part in {"api", "developer", "developers", "docs", "help", "platform", "reference", "support"}
+            for part in hostname.split(".")
+            if part
+        )
+        return registered_domain_label_match or (host_brand_match and official_host_surface) or (
+            title_brand_match and official_host_surface
         )
 
     def _align_citations_with_results(
@@ -2710,6 +3813,87 @@ class MySearchClient:
         cleaned_domain = self._clean_hostname(domain)
         return bool(cleaned_host) and bool(cleaned_domain) and (
             cleaned_host == cleaned_domain or cleaned_host.endswith(f".{cleaned_domain}")
+        )
+
+    def _registered_domain_label_matches(self, *, registered_domain: str, query_tokens: list[str]) -> bool:
+        labels = [item for item in self._clean_hostname(registered_domain).split(".") if item]
+        return any(
+            label == token or label.startswith(f"{token}-") or label.startswith(f"{token}_")
+            for token in query_tokens
+            for label in labels
+        )
+
+    def _resource_result_flags(
+        self,
+        *,
+        mode: SearchMode,
+        item: dict[str, Any],
+        query_tokens: list[str],
+        include_domains: list[str] | None,
+    ) -> dict[str, Any]:
+        url = item.get("url", "")
+        hostname = self._result_hostname(item)
+        registered_domain = self._registered_domain(hostname)
+        title_text = (item.get("title") or "").lower()
+        include_match = bool(
+            include_domains
+            and any(self._domain_matches(hostname, domain) for domain in include_domains or [])
+        )
+        host_brand_match = any(
+            token in hostname or token in registered_domain for token in query_tokens
+        )
+        registered_domain_label_match = self._registered_domain_label_matches(
+            registered_domain=registered_domain,
+            query_tokens=query_tokens,
+        )
+        title_brand_match = any(token in title_text for token in query_tokens)
+        docs_shape_match = self._looks_like_resource_result(
+            url=url,
+            hostname=hostname,
+            title_text=title_text,
+            mode=mode,
+        )
+        non_third_party = not self._is_obvious_third_party_resource(
+            hostname=hostname,
+            registered_domain=registered_domain,
+            mode=mode,
+        )
+        return {
+            "hostname": hostname,
+            "registered_domain": registered_domain,
+            "include_match": include_match,
+            "host_brand_match": host_brand_match,
+            "registered_domain_label_match": registered_domain_label_match,
+            "title_brand_match": title_brand_match,
+            "docs_shape_match": docs_shape_match,
+            "non_third_party": non_third_party,
+        }
+
+    def _result_matches_official_policy(
+        self,
+        *,
+        item: dict[str, Any],
+        mode: SearchMode,
+        query_tokens: list[str],
+        include_domains: list[str] | None,
+        strict_official: bool,
+    ) -> bool:
+        flags = self._resource_result_flags(
+            mode=mode,
+            item=item,
+            query_tokens=query_tokens,
+            include_domains=include_domains,
+        )
+        return self._is_probably_official_resource_result(
+            mode=mode,
+            hostname=str(flags["hostname"]),
+            include_match=bool(flags["include_match"]),
+            registered_domain_label_match=bool(flags["registered_domain_label_match"]),
+            host_brand_match=bool(flags["host_brand_match"]),
+            title_brand_match=bool(flags["title_brand_match"]),
+            docs_shape_match=bool(flags["docs_shape_match"]),
+            non_third_party=bool(flags["non_third_party"]),
+            official_query=strict_official,
         )
 
     def _query_brand_tokens(self, query: str) -> list[str]:
@@ -2849,6 +4033,115 @@ class MySearchClient:
         }
         return registered_domain in third_party_domains
 
+    def _collect_source_domains(
+        self,
+        *,
+        results: list[dict[str, Any]],
+        citations: list[dict[str, Any]],
+    ) -> list[str]:
+        domains: list[str] = []
+        seen: set[str] = set()
+        for item in [*results, *citations]:
+            if not isinstance(item, dict):
+                continue
+            hostname = self._result_hostname(item)
+            registered_domain = self._registered_domain(hostname)
+            if not registered_domain or registered_domain in seen:
+                continue
+            seen.add(registered_domain)
+            domains.append(registered_domain)
+        return domains
+
+    def _count_official_resource_results(
+        self,
+        *,
+        query: str,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        results: list[dict[str, Any]],
+        include_domains: list[str] | None,
+    ) -> int:
+        official_mode = self._resolve_official_result_mode(
+            query=query,
+            mode=mode,
+            intent=intent,
+            include_domains=include_domains,
+        )
+        if official_mode == "off" and not self._should_rerank_resource_results(mode=mode, intent=intent):
+            return 0
+        query_tokens = self._query_brand_tokens(query)
+        strict_official = official_mode == "strict"
+        official_count = 0
+        for item in results:
+            if self._result_matches_official_policy(
+                item=item,
+                mode=mode,
+                query_tokens=query_tokens,
+                include_domains=include_domains,
+                strict_official=strict_official,
+            ):
+                official_count += 1
+        return official_count
+
+    def _detect_evidence_conflicts(
+        self,
+        *,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        results: list[dict[str, Any]],
+        include_domains: list[str] | None,
+        source_domains: list[str],
+        official_source_count: int,
+        providers_consulted: list[str],
+        official_mode: str,
+    ) -> list[str]:
+        conflicts: list[str] = []
+        if len(source_domains) <= 1 and len(results) > 1:
+            conflicts.append("low-source-diversity")
+        if len(set(providers_consulted)) <= 1 and len(source_domains) <= 1 and results:
+            conflicts.append("single-provider-single-domain")
+        if self._should_rerank_resource_results(mode=mode, intent=intent):
+            if results and official_source_count <= 0:
+                conflicts.append("official-source-not-confirmed")
+            elif results and official_source_count < len(results):
+                conflicts.append("mixed-official-and-third-party")
+            if include_domains and not results:
+                conflicts.append("domain-filter-returned-empty")
+        if official_mode == "strict" and results and official_source_count <= 0:
+            conflicts.append("strict-official-unmet")
+        return conflicts
+
+    def _estimate_search_confidence(
+        self,
+        *,
+        mode: SearchMode,
+        intent: ResolvedSearchIntent,
+        result_count: int,
+        source_domain_count: int,
+        official_source_count: int,
+        verification: str,
+        conflicts: list[str],
+        official_mode: str,
+    ) -> str:
+        if result_count <= 0:
+            return "low"
+        if official_mode == "strict" and official_source_count <= 0:
+            return "low"
+        if self._should_rerank_resource_results(mode=mode, intent=intent):
+            if official_source_count > 0 and "official-source-not-confirmed" not in conflicts:
+                if (
+                    verification == "cross-provider"
+                    or (source_domain_count >= 2 and "mixed-official-and-third-party" not in conflicts)
+                ):
+                    return "high"
+                return "medium"
+            return "medium" if source_domain_count >= 2 else "low"
+        if verification == "cross-provider" and source_domain_count >= 2:
+            return "high"
+        if source_domain_count >= 2:
+            return "medium"
+        return "low" if conflicts else "medium"
+
     def _describe_provider(
         self,
         provider: ProviderConfig,
@@ -2858,6 +4151,7 @@ class MySearchClient:
         return {
             "base_url": provider.base_url,
             "alternate_base_urls": provider.alternate_base_urls,
+            "provider_mode": provider.provider_mode,
             "auth_mode": provider.auth_mode,
             "paths": provider.default_paths,
             "search_mode": provider.search_mode,
@@ -2872,6 +4166,15 @@ class MySearchClient:
     def _get_key_or_raise(self, provider: ProviderConfig):
         record = self.keyring.get_next(provider.name)
         if record is None:
+            if provider.name == "tavily":
+                raise MySearchError(
+                    "Tavily is not configured. Use "
+                    "MYSEARCH_TAVILY_MODE=gateway with MYSEARCH_TAVILY_GATEWAY_TOKEN "
+                    "to consume an upstream gateway, or keep "
+                    "MYSEARCH_TAVILY_MODE=official and import your own Tavily keys "
+                    "with MYSEARCH_TAVILY_API_KEY / MYSEARCH_TAVILY_API_KEYS / "
+                    "MYSEARCH_TAVILY_KEYS_FILE."
+                )
             if provider.name == "xai":
                 raise MySearchError(
                     "xAI / Social search is not configured; MySearch can still use "
@@ -2893,13 +4196,13 @@ class MySearchClient:
         provider: ProviderConfig,
         method: str,
         path: str,
-        payload: dict[str, Any],
+        payload: dict[str, Any] | None,
         key: str,
         base_url: str | None = None,
         timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         headers: dict[str, str] = {}
-        body = dict(payload)
+        body = dict(payload or {})
 
         if provider.auth_mode == "bearer":
             token = key if not provider.auth_scheme else f"{provider.auth_scheme} {key}"
@@ -2912,7 +4215,9 @@ class MySearchClient:
         url = f"{(base_url or provider.base_url)}{path}"
         headers.setdefault("Content-Type", "application/json")
         headers.setdefault("User-Agent", "MySearch/0.2")
-        request_body = json.dumps(body).encode("utf-8")
+        request_body = None
+        if method.upper() != "GET":
+            request_body = json.dumps(body).encode("utf-8")
         request = Request(
             url,
             data=request_body,
@@ -2958,6 +4263,106 @@ class MySearchClient:
                 url=url,
             )
         return data
+
+    def _request_text(
+        self,
+        *,
+        url: str,
+        timeout_seconds: int | None = None,
+    ) -> tuple[int, str]:
+        request = Request(
+            url,
+            headers={
+                "User-Agent": "MySearch/0.2",
+                "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+            },
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=timeout_seconds or self.config.timeout_seconds) as response:
+                return response.status, response.read().decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8", errors="replace")
+        except (URLError, OSError) as exc:
+            raise MySearchError(str(exc)) from exc
+
+    def _xai_probe_model(self) -> str:
+        return "grok-4.1-fast"
+
+    def _derive_root_health_base_url(self, provider: ProviderConfig) -> str:
+        candidate = (
+            provider.base_url_for("social_search")
+            or provider.base_url_for("social_health")
+            or provider.base_url
+        )
+        parsed = urlparse(str(candidate or "").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return str(candidate or "").strip().rstrip("/")
+        return urlunparse((parsed.scheme, parsed.netloc, "", "", "", "")).rstrip("/")
+
+    def _probe_xai_official_status_page(self, timeout_seconds: int) -> None:
+        status_url = "https://status.x.ai/"
+        status_code, response_text = self._request_text(
+            url=status_url,
+            timeout_seconds=timeout_seconds,
+        )
+        if status_code >= 400:
+            raise MySearchHTTPError(
+                provider="xai",
+                status_code=status_code,
+                detail=f"status.x.ai returned HTTP {status_code}",
+                url=status_url,
+            )
+
+        lowered = " ".join(response_text.lower().split())
+        if "all systems operational" in lowered:
+            return
+
+        matches = re.findall(
+            r"api(?:\s*\([^)]*\))?[^a-z]{0,40}(available|operational|degraded|outage|unavailable|disrupted)",
+            lowered,
+        )
+        if matches:
+            negative = {"degraded", "outage", "unavailable", "disrupted"}
+            if any(item in negative for item in matches):
+                raise MySearchError(
+                    "status.x.ai reports xAI API is not fully available"
+                )
+            return
+
+        if "api" in lowered and "available" in lowered:
+            return
+
+        raise MySearchError("unable to determine xAI API status from status.x.ai")
+
+    def _probe_xai_official_via_responses(
+        self,
+        provider: ProviderConfig,
+        key: str,
+        timeout_seconds: int,
+    ) -> None:
+        fallback_timeout_seconds = min(self.config.timeout_seconds, 20)
+        self._request_json(
+            provider=provider,
+            method="POST",
+            path=provider.path("responses"),
+            payload=self._build_xai_responses_payload(
+                query="openai",
+                sources=["x"],
+                max_results=1,
+                include_domains=None,
+                exclude_domains=None,
+                allowed_x_handles=None,
+                excluded_x_handles=None,
+                from_date=None,
+                to_date=None,
+                include_x_images=False,
+                include_x_videos=False,
+                model=self._xai_probe_model(),
+            ),
+            key=key,
+            timeout_seconds=max(timeout_seconds, fallback_timeout_seconds),
+        )
 
     def _probe_provider_status(
         self,
@@ -3014,6 +4419,46 @@ class MySearchClient:
             }
         return result
 
+    def _probe_xai_compatible_gateway(self, provider: ProviderConfig, key: str, timeout_seconds: int) -> None:
+        health_path = "/health"
+        health_base_url = self._derive_root_health_base_url(provider)
+        try:
+            payload = self._request_json(
+                provider=provider,
+                method="GET",
+                path=health_path,
+                payload=None,
+                key=key,
+                base_url=health_base_url,
+                timeout_seconds=timeout_seconds,
+            )
+            if isinstance(payload, dict) and payload.get("ok") is False:
+                detail = (
+                    payload.get("error")
+                    or payload.get("detail")
+                    or "social/X gateway health probe reported unavailable"
+                )
+                raise MySearchError(str(detail))
+            return
+        except (MySearchHTTPError, MySearchError):
+            pass
+
+        fallback_timeout_seconds = min(self.config.timeout_seconds, 20)
+        self._request_json(
+            provider=provider,
+            method="POST",
+            path=provider.path("social_search"),
+            payload={
+                "query": "openai",
+                "source": "x",
+                "max_results": 1,
+                "model": self._xai_probe_model(),
+            },
+            key=key,
+            base_url=provider.base_url_for("social_search"),
+            timeout_seconds=fallback_timeout_seconds,
+        )
+
     def _probe_provider_request(self, provider: ProviderConfig, key: str) -> None:
         timeout_seconds = min(self.config.timeout_seconds, 10)
         if provider.name == "tavily":
@@ -3061,40 +4506,24 @@ class MySearchClient:
             return
         if provider.name == "xai":
             if provider.search_mode == "compatible":
-                self._request_json(
+                self._probe_xai_compatible_gateway(provider, key, timeout_seconds)
+                return
+            try:
+                self._probe_xai_official_status_page(timeout_seconds=timeout_seconds)
+            except MySearchError as exc:
+                if "not fully available" in str(exc):
+                    raise
+                self._probe_xai_official_via_responses(
                     provider=provider,
-                    method="POST",
-                    path=provider.path("social_search"),
-                    payload={
-                        "query": "openai",
-                        "source": "x",
-                        "max_results": 1,
-                    },
                     key=key,
-                    base_url=provider.base_url_for("social_search"),
                     timeout_seconds=timeout_seconds,
                 )
-                return
-            self._request_json(
-                provider=provider,
-                method="POST",
-                path=provider.path("responses"),
-                payload=self._build_xai_responses_payload(
-                    query="openai",
-                    sources=["x"],
-                    max_results=1,
-                    include_domains=None,
-                    exclude_domains=None,
-                    allowed_x_handles=None,
-                    excluded_x_handles=None,
-                    from_date=None,
-                    to_date=None,
-                    include_x_images=False,
-                    include_x_videos=False,
-                ),
-                key=key,
-                timeout_seconds=timeout_seconds,
-            )
+            except MySearchHTTPError as exc:
+                self._probe_xai_official_via_responses(
+                    provider=provider,
+                    key=key,
+                    timeout_seconds=timeout_seconds,
+                )
             return
 
     def _summarize_route_error(self, error_text: str) -> str:
@@ -3298,13 +4727,11 @@ class MySearchClient:
             "documentation",
             "api reference",
             "changelog",
-            "pricing",
             "readme",
             "github",
             "manual",
             "文档",
             "接口",
-            "价格",
             "更新日志",
         ]
         return any(keyword in query_lower for keyword in keywords)

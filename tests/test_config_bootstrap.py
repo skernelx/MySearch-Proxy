@@ -36,6 +36,75 @@ class ConfigBootstrapTests(unittest.TestCase):
             else:
                 os.environ[key] = value
 
+    def test_tavily_gateway_mode_prefers_gateway_token_and_disables_local_key_file(self) -> None:
+        snapshot = self._preserve_env(
+            "MYSEARCH_PROXY_BASE_URL",
+            "MYSEARCH_PROXY_API_KEY",
+            "MYSEARCH_TAVILY_MODE",
+            "MYSEARCH_TAVILY_GATEWAY_BASE_URL",
+            "MYSEARCH_TAVILY_GATEWAY_SEARCH_PATH",
+            "MYSEARCH_TAVILY_GATEWAY_EXTRACT_PATH",
+            "MYSEARCH_TAVILY_GATEWAY_TOKEN",
+            "MYSEARCH_TAVILY_API_KEY",
+            "MYSEARCH_TAVILY_KEYS_FILE",
+        )
+        try:
+            os.environ["MYSEARCH_TAVILY_MODE"] = "gateway"
+            os.environ["MYSEARCH_TAVILY_GATEWAY_BASE_URL"] = "http://127.0.0.1:8787/api/tavily"
+            os.environ["MYSEARCH_TAVILY_GATEWAY_TOKEN"] = "th-demo-token"
+            os.environ["MYSEARCH_TAVILY_API_KEY"] = "tvly-official-key"
+            os.environ["MYSEARCH_TAVILY_KEYS_FILE"] = "accounts.txt"
+
+            module = _load_module(
+                "test_mysearch_config_tavily_gateway_mode",
+                REPO_ROOT / "mysearch" / "config.py",
+            )
+            config = module.MySearchConfig.from_env()
+
+            self.assertEqual(config.tavily.provider_mode, "gateway")
+            self.assertEqual(config.tavily.base_url, "http://127.0.0.1:8787/api/tavily")
+            self.assertEqual(config.tavily.path("search"), "/search")
+            self.assertEqual(config.tavily.path("extract"), "/extract")
+            self.assertEqual(config.tavily.auth_mode, "bearer")
+            self.assertEqual(config.tavily.api_keys, ["th-demo-token"])
+            self.assertIsNone(config.tavily.keys_file)
+        finally:
+            self._restore_env(snapshot)
+
+    def test_tavily_official_mode_ignores_proxy_token_and_keeps_local_pool(self) -> None:
+        snapshot = self._preserve_env(
+            "MYSEARCH_PROXY_BASE_URL",
+            "MYSEARCH_PROXY_API_KEY",
+            "MYSEARCH_TAVILY_MODE",
+            "MYSEARCH_TAVILY_BASE_URL",
+            "MYSEARCH_TAVILY_SEARCH_PATH",
+            "MYSEARCH_TAVILY_EXTRACT_PATH",
+            "MYSEARCH_TAVILY_API_KEY",
+            "MYSEARCH_TAVILY_KEYS_FILE",
+        )
+        try:
+            os.environ["MYSEARCH_PROXY_BASE_URL"] = "https://proxy.example.com"
+            os.environ["MYSEARCH_PROXY_API_KEY"] = "mysp-token"
+            os.environ["MYSEARCH_TAVILY_MODE"] = "official"
+            os.environ["MYSEARCH_TAVILY_API_KEY"] = "tvly-direct-key"
+            os.environ["MYSEARCH_TAVILY_KEYS_FILE"] = "custom-accounts.txt"
+
+            module = _load_module(
+                "test_mysearch_config_tavily_official_mode",
+                REPO_ROOT / "mysearch" / "config.py",
+            )
+            config = module.MySearchConfig.from_env()
+
+            self.assertEqual(config.tavily.provider_mode, "official")
+            self.assertEqual(config.tavily.base_url, "https://api.tavily.com")
+            self.assertEqual(config.tavily.path("search"), "/search")
+            self.assertEqual(config.tavily.path("extract"), "/extract")
+            self.assertEqual(config.tavily.auth_mode, "body")
+            self.assertEqual(config.tavily.api_keys, ["tvly-direct-key"])
+            self.assertEqual(config.tavily.keys_file, REPO_ROOT / "custom-accounts.txt")
+        finally:
+            self._restore_env(snapshot)
+
     def test_codex_config_env_wins_over_dotenv_and_dotenv_fills_missing_values(self) -> None:
         snapshot = self._preserve_env(
             "CODEX_HOME",

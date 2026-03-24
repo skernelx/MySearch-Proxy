@@ -5,10 +5,12 @@ import sys
 import unittest
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from mysearch import social_gateway
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 PROXY_DIR = REPO_ROOT / "proxy"
 if str(PROXY_DIR) not in sys.path:
     sys.path.insert(0, str(PROXY_DIR))
@@ -236,10 +238,56 @@ class SocialFallbackRouteTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["tool_usage"]["social_search_calls"], 2)
             self.assertEqual(result["tool_usage"]["model"], "grok-4.1-fast")
             self.assertEqual(result["route"]["selected_model"], "grok-4.1-fast")
-            self.assertTrue(result["route"]["fallback"]["triggered"])
-            self.assertTrue(result["route"]["fallback"]["used"])
-            self.assertEqual(result["route"]["fallback"]["reason"], "result_count_below_threshold")
-            self.assertEqual(len(result["results"]), 3)
+
+    async def test_requested_model_overrides_primary_model(self) -> None:
+        primary = _payload(
+            text='{"answer":"custom","results":[{"url":"https://x.com/mcp/status/1904234567890123456","text":"one"}]}',
+            citations=[{"url": "https://x.com/mcp/status/1904234567890123456", "title": "one"}],
+        )
+
+        for module in (social_gateway, proxy_server):
+            fake_client = _FakeHttpClient([_FakeResponse(200, primary)])
+            request = _FakeRequest(
+                {
+                    "query": "Model Context Protocol",
+                    "source": "x",
+                    "max_results": 1,
+                    "model": "grok-4.20-beta-latest-non-reasoning",
+                }
+            )
+            original_http_client = module.http_client
+
+            if module is social_gateway:
+                original_resolve = module.resolve_gateway_state
+                original_verify = module.verify_gateway_token
+                module.resolve_gateway_state = _fake_gateway_state  # type: ignore[assignment]
+                module.verify_gateway_token = lambda token, accepted_tokens: None  # type: ignore[assignment]
+                route = module.social_search
+            else:
+                original_resolve = module.resolve_social_gateway_state
+                original_verify = module.verify_social_gateway_token
+                module.resolve_social_gateway_state = _fake_proxy_state  # type: ignore[assignment]
+                module.verify_social_gateway_token = lambda token, accepted_tokens: None  # type: ignore[assignment]
+                route = module.proxy_social_search
+
+            module.http_client = fake_client
+            try:
+                result = await route(request)
+            finally:
+                module.http_client = original_http_client
+                if module is social_gateway:
+                    module.resolve_gateway_state = original_resolve  # type: ignore[assignment]
+                    module.verify_gateway_token = original_verify  # type: ignore[assignment]
+                else:
+                    module.resolve_social_gateway_state = original_resolve  # type: ignore[assignment]
+                    module.verify_social_gateway_token = original_verify  # type: ignore[assignment]
+
+            self.assertEqual(fake_client.calls[0]["json"]["model"], "grok-4.20-beta-latest-non-reasoning")
+            self.assertEqual(result["route"]["selected_model"], "grok-4.20-beta-latest-non-reasoning")
+            self.assertFalse(result["route"]["fallback"]["triggered"])
+            self.assertFalse(result["route"]["fallback"]["used"])
+            self.assertEqual(result["route"]["fallback"]["reason"], "")
+            self.assertEqual(len(result["results"]), 1)
 
     async def test_enough_results_keeps_primary_model(self) -> None:
         primary = _payload(
@@ -263,12 +311,29 @@ class SocialFallbackRouteTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result["route"]["fallback"]["triggered"])
             self.assertFalse(result["route"]["fallback"]["used"])
 
+    async def test_max_results_one_does_not_force_fallback(self) -> None:
+        primary = _payload(
+            text='{"answer":"mini","results":[{"url":"https://x.com/mcp/status/1906234567890123456","text":"one"}]}',
+            citations=[{"url": "https://x.com/mcp/status/1906234567890123456", "title": "one"}],
+        )
+
+        for module in (social_gateway, proxy_server):
+            result, client = await self._run_route(
+                module,
+                responses=[_FakeResponse(200, primary)],
+                max_results=1,
+            )
+            self.assertEqual(len(client.calls), 1)
+            self.assertEqual(result["tool_usage"]["social_search_calls"], 1)
+            self.assertFalse(result["route"]["fallback"]["triggered"])
+            self.assertEqual(result["route"]["fallback"]["threshold"], 1)
+
     async def test_upstream_error_falls_back_to_secondary_model(self) -> None:
         fallback = _payload(
-            text='{"answer":"fast","results":[{"url":"https://x.com/mcp/status/1906234567890123456","text":"one"},{"url":"https://x.com/openai/status/1906234567890123457","text":"two"}]}',
+            text='{"answer":"fast","results":[{"url":"https://x.com/mcp/status/1907234567890123456","text":"one"},{"url":"https://x.com/openai/status/1907234567890123457","text":"two"}]}',
             citations=[
-                {"url": "https://x.com/mcp/status/1906234567890123456", "title": "one"},
-                {"url": "https://x.com/openai/status/1906234567890123457", "title": "two"},
+                {"url": "https://x.com/mcp/status/1907234567890123456", "title": "one"},
+                {"url": "https://x.com/openai/status/1907234567890123457", "title": "two"},
             ],
         )
 

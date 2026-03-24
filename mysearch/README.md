@@ -67,6 +67,13 @@ MYSEARCH_PROXY_API_KEY=mysp-...
 
 如果你还没有 Proxy，也可以直接连 provider。
 
+现在 Tavily 也支持显式两种接法：
+
+- `MYSEARCH_TAVILY_MODE=official`
+  - 自己导入和轮询 Tavily 官方 key
+- `MYSEARCH_TAVILY_MODE=gateway`
+  - 用上游 gateway token 访问兼容网关，例如 `tavily-hikari`
+
 ## 直连 provider 的最小配置
 
 最小直连通常至少需要：
@@ -74,6 +81,23 @@ MYSEARCH_PROXY_API_KEY=mysp-...
 ```env
 MYSEARCH_TAVILY_API_KEY=tvly-...
 MYSEARCH_FIRECRAWL_API_KEY=fc-...
+```
+
+如果你要让 Tavily 走上游 gateway：
+
+```env
+MYSEARCH_TAVILY_MODE=gateway
+MYSEARCH_TAVILY_GATEWAY_BASE_URL=http://127.0.0.1:8787/api/tavily
+MYSEARCH_TAVILY_GATEWAY_TOKEN=th-xxxx-xxxxxxxxxxxx
+MYSEARCH_FIRECRAWL_API_KEY=fc-...
+```
+
+如果你明确不走上游 gateway，就保持：
+
+```env
+MYSEARCH_TAVILY_MODE=official
+MYSEARCH_TAVILY_API_KEYS=tvly-a,tvly-b
+MYSEARCH_TAVILY_KEYS_FILE=accounts.txt
 ```
 
 如果你也要接 Exa：
@@ -123,6 +147,84 @@ python3 -m venv venv
 - 安装 `mysearch/requirements.txt`
 - 如果本机有 `codex` 或 `claude` 命令，就自动注册 `mysearch` MCP
 - 如果宿主已有 `mysearch` config，会直接复用其中的 `MYSEARCH_*`
+
+## 作为 Docker MCP 服务运行
+
+如果你已经把仓库根目录的一套 compose 跑起来：
+
+```bash
+cd /path/to/MySearch-Proxy
+docker compose up -d
+```
+
+这时 `mysearch` 会通过 `MYSEARCH_PROXY_BOOTSTRAP_TOKEN` 自动从 `proxy` 申请或复用自己的 `mysp-` token，不再要求你手动先创建 MySearch 通用 token 才能拉起远程 MCP。
+
+默认远程 MCP 地址：
+
+- `streamableHTTP`
+  - `http://127.0.0.1:8000/mcp`
+- `SSE`
+  - `http://127.0.0.1:8000/sse`
+
+如果你部署的是单容器 `mysearch-stack`，容器会同时对外提供 `9874` 控制台和 `8000/mcp`；`mysearch` 自己仍然通过容器内 `127.0.0.1:9874` 回连 Proxy。
+
+部署完成后，如果你要让 `Codex` 直接使用这个远程 MCP，最小 `~/.codex/config.toml` 配置是：
+
+```toml
+[mcp_servers.mysearch]
+type = "http"
+url = "http://127.0.0.1:8000/mcp"
+```
+
+如果你部署在远程主机：
+
+```toml
+[mcp_servers.mysearch]
+type = "http"
+url = "https://mysearch.example.com/mcp"
+```
+
+如果你的远程入口额外套了 Bearer 鉴权，可以继续写成：
+
+```toml
+[mcp_servers.mysearch]
+type = "http"
+url = "https://mysearch.example.com/mcp"
+headers = { Authorization = "Bearer YOUR_MCP_TOKEN" }
+```
+
+加完配置后重启 `Codex`，再验收：
+
+```bash
+codex mcp get mysearch
+python3 skill/scripts/check_mysearch.py --health-only
+```
+
+如果你只想单独构建 `mysearch` 镜像，也可以：
+
+```bash
+docker build -t mysearch-mcp ./mysearch
+docker run --rm -p 8000:8000 \
+  -e MYSEARCH_PROXY_BASE_URL=http://<your-proxy-host>:9874 \
+  -e MYSEARCH_PROXY_API_KEY=mysp-... \
+  mysearch-mcp
+```
+
+如果你更看重“部署最简单”，还可以直接跑单容器镜像：
+
+```bash
+docker run -d \
+  --name mysearch-stack \
+  --restart unless-stopped \
+  -p 9874:9874 \
+  -p 8000:8000 \
+  -e ADMIN_PASSWORD=change-me \
+  -e MYSEARCH_PROXY_BOOTSTRAP_TOKEN=change-me-bootstrap-token \
+  -v $(pwd)/mysearch-proxy-data:/data \
+  skernelx/mysearch-stack:latest
+```
+
+这个镜像会在同一容器里同时启动 `proxy` 和 `mysearch`，并通过内部 bootstrap 接口自动创建或复用 `mysearch` 专用 token。
 
 ## 推荐验收
 
@@ -207,14 +309,24 @@ MySearch 不是单一 provider 的壳。
   - 优先 Tavily
 - `docs / github / pdf`
   - 优先 Firecrawl
-- 补充网页发现
-  - 可回退 Exa
+- `pricing / changelog / 官方文档`
+  - 仍按 Firecrawl / 官方结果优先处理，不为凑数默认混入第三方页面
+- 补充网页发现 / 长尾资料
+  - Exa 只做补位，不做默认主搜
 - `social`
   - 走 xAI 或 compatible `/social/search`
 - `extract_url`
   - Firecrawl 优先，Tavily 回退
 - `research`
-  - 搜索 + 抓取 + 可选 social 补充
+  - 一轮小 research：搜索发现 + 正文抓取 + 可选 social 补充
+
+补充约束：
+
+- `web` 与 `news` 使用不同排序口径：
+  - `web` 更看官方性、页面相关性
+  - `news` 更看时效、媒体质量与事件一致性
+- `official / 官方 / 官网`、`docs / pricing / changelog` 一类查询会进入更严格的官方结果模式；如果官方域结果不足，会明确说明，而不是默认拿第三方结果补齐
+- Exa 只在 Tavily / Firecrawl 结果不足、长尾语义查询或显式 fallback 场景下介入
 
 ## Intent 和 Strategy
 
@@ -239,13 +351,13 @@ MySearch 不是单一 provider 的壳。
 适合记忆的简单规则：
 
 - 想快一点：
-  - `fast`
+  - `fast`：单 provider，最小候选池
 - 想稳一点：
-  - `balanced`
+  - `balanced`：主 provider 为主，按模式补少量候选
 - 想多做交叉验证：
-  - `verify`
+  - `verify`：扩大候选池并交叉验证，必要时启用 Exa 补位
 - 想做小研究：
-  - `deep`
+  - `deep`：更偏 `research` 的较大候选池与更多正文抓取
 
 ## 关键环境变量
 

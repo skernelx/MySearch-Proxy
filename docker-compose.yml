@@ -1,0 +1,48 @@
+services:
+  proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    ports:
+      - "${MYSEARCH_PROXY_PORT:-9874}:9874"
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      MYSEARCH_PROXY_DB_PATH: ${MYSEARCH_PROXY_DB_PATH:-/data/proxy.db}
+      MYSEARCH_PROXY_BOOTSTRAP_TOKEN: ${MYSEARCH_PROXY_BOOTSTRAP_TOKEN:-change-me-bootstrap-token}
+      STATS_CACHE_TTL_SECONDS: ${STATS_CACHE_TTL_SECONDS:-8}
+      DASHBOARD_AUTO_SYNC_ON_STATS: ${DASHBOARD_AUTO_SYNC_ON_STATS:-0}
+      DASHBOARD_BACKGROUND_SYNC_ON_STATS: ${DASHBOARD_BACKGROUND_SYNC_ON_STATS:-1}
+      DASHBOARD_BACKGROUND_SYNC_MIN_INTERVAL_SECONDS: ${DASHBOARD_BACKGROUND_SYNC_MIN_INTERVAL_SECONDS:-45}
+    volumes:
+      - mysearch-proxy-data:/data
+    restart: unless-stopped
+
+  mysearch:
+    build:
+      context: ./mysearch
+      dockerfile: Dockerfile
+    depends_on:
+      - proxy
+    ports:
+      - "${MYSEARCH_MCP_PORT:-8000}:8000"
+    environment:
+      MYSEARCH_NAME: ${MYSEARCH_NAME:-MySearch}
+      MYSEARCH_TIMEOUT_SECONDS: ${MYSEARCH_TIMEOUT_SECONDS:-45}
+      MYSEARCH_PROXY_BASE_URL: ${MYSEARCH_PROXY_BASE_URL:-http://proxy:9874}
+      MYSEARCH_PROXY_API_KEY: ${MYSEARCH_PROXY_API_KEY:-}
+      MYSEARCH_PROXY_BOOTSTRAP_TOKEN: ${MYSEARCH_PROXY_BOOTSTRAP_TOKEN:-change-me-bootstrap-token}
+      MYSEARCH_PROXY_BOOTSTRAP_NAME: ${MYSEARCH_PROXY_BOOTSTRAP_NAME:-docker-mysearch}
+      MYSEARCH_MCP_HOST: 0.0.0.0
+      MYSEARCH_MCP_PORT: 8000
+      MYSEARCH_MCP_STREAMABLE_HTTP_PATH: ${MYSEARCH_MCP_STREAMABLE_HTTP_PATH:-/mcp}
+      MYSEARCH_MCP_SSE_PATH: ${MYSEARCH_MCP_SSE_PATH:-/sse}
+      MYSEARCH_MCP_STATELESS_HTTP: ${MYSEARCH_MCP_STATELESS_HTTP:-false}
+      MYSEARCH_MAX_PARALLEL_WORKERS: ${MYSEARCH_MAX_PARALLEL_WORKERS:-4}
+      MYSEARCH_SEARCH_CACHE_TTL_SECONDS: ${MYSEARCH_SEARCH_CACHE_TTL_SECONDS:-30}
+      MYSEARCH_EXTRACT_CACHE_TTL_SECONDS: ${MYSEARCH_EXTRACT_CACHE_TTL_SECONDS:-300}
+    entrypoint: ["/app/mysearch/docker-entrypoint.sh"]
+    command: ["python", "-m", "mysearch", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+
+volumes:
+  mysearch-proxy-data:

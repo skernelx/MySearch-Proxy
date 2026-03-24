@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    MYSEARCH_PROXY_BASE_URL=http://127.0.0.1:9874 \
+    MYSEARCH_PROXY_DB_PATH=/data/proxy.db
+
+WORKDIR /app
+
+COPY proxy/requirements.txt /tmp/proxy-requirements.txt
+COPY mysearch/requirements.txt /tmp/mysearch-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/proxy-requirements.txt -r /tmp/mysearch-requirements.txt
+
+COPY proxy /app/proxy
+COPY mysearch /app/mysearch
+COPY docker /app/docker
+
+RUN chmod +x /app/docker/combined-entrypoint.sh /app/mysearch/docker-entrypoint.sh
+
+EXPOSE 9874 8000
+
+CMD ["/app/docker/combined-entrypoint.sh"]
